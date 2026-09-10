@@ -1,0 +1,98 @@
+diff --git a/package/fcm/fwx/src/fwx_client.c b/package/fcm/fwx/src/fwx_client.c
+index a5f7185b9a..179305650f 100644
+--- a/package/fcm/fwx/src/fwx_client.c
++++ b/package/fcm/fwx/src/fwx_client.c
+@@ -565,12 +565,15 @@ static inline int get_packet_dir(struct net_device *in)
+ 
+ void af_update_client_status(af_client_info_t *node)
+ {
+-	if (node->last_flow.down_bytes > 0){
+-		node->period_flow.down_bytes += (node->flow.down_bytes - node->last_flow.down_bytes);
++	/* Always take the delta; skipping when last_flow==0 dropped the first sample */
++	{
++		long long d_down = (long long)node->flow.down_bytes - (long long)node->last_flow.down_bytes;
++		long long d_up = (long long)node->flow.up_bytes - (long long)node->last_flow.up_bytes;
++		if (d_down > 0)
++			node->period_flow.down_bytes += (unsigned long long)d_down;
++		if (d_up > 0)
++			node->period_flow.up_bytes += (unsigned long long)d_up;
+ 	}
+-	if (node->last_flow.up_bytes > 0){
+-		node->period_flow.up_bytes += (node->flow.up_bytes - node->last_flow.up_bytes);
+-	}	
+ 	AF_LMT_DEBUG("period flow down:%llu up: %llu pkg up %d\n", node->period_flow.down_bytes, 
+ 		node->period_flow.up_bytes, node->rate.pkt_up_rate);
+ 
+@@ -712,41 +715,22 @@ static u_int32_t af_client_hook2(unsigned int hook,
+ 								 int (*okfn)(struct sk_buff *))
+ {
+ #endif
+-	struct ethhdr *ethhdr = NULL;
+-	unsigned char smac[ETH_ALEN];
+ 	af_client_info_t *nfc = NULL;
+-	int pkt_dir = 0;
+ 	struct iphdr *iph = NULL;
+ 	struct ipv6hdr *ip6h = NULL;
+-	enum ip_conntrack_info ctinfo;
+-
+-	struct nf_conn *ct = nf_ct_get(skb, &ctinfo);
+-	if (ct == NULL)
+-	{
+-		return NF_ACCEPT;
+-	}
+ 
++	/* UA3F/TPROXY compatibility: this hook runs at POST_ROUTING.
++	 * Match the EGRESS device (state->out == br-lan) instead of the old
++	 * ingress-device check that only worked at FORWARD. Do not require
++	 * conntrack: locally generated proxy replies may lack a usable CT,
++	 * and only the dst IP is needed here. */
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
+-	if (!skb->dev)
++	if (!(state && state->out && strstr(state->out->name, g_lan_ifname)))
+ 		return NF_ACCEPT;
+-
+-	pkt_dir = get_packet_dir(skb->dev);
+ #else
+-	if (!in)
+-	{
+-		AF_ERROR("in is NULL\n");
++	if (!(out && strstr(out->name, g_lan_ifname)))
+ 		return NF_ACCEPT;
+-	}
+-	pkt_dir = get_packet_dir(in);
+ #endif
+-	if (!skb->dev)
+-	{
+-		return NF_ACCEPT;
+-	}
+-
+-
+-	if (PKT_DIR_DOWN != pkt_dir)
+-		return NF_ACCEPT;
+ 
+ 	AF_CLIENT_LOCK_R();
+ 	
+@@ -777,15 +761,20 @@ static u_int32_t af_client_hook2(unsigned int hook,
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
+ static struct nf_hook_ops af_client_ops[] = {
+ 	{
++		/* PRE_ROUTING (after conntrack, before mangle/TPROXY):
++		 * count uploads per src MAC even when UA3F TPROXY later diverts
++		 * the packet to local delivery (which never hits FORWARD) */
+ 		.hook = af_client_hook,
+ 		.pf = NFPROTO_INET,
+-		.hooknum = NF_INET_FORWARD,
+-		.priority = NF_IP_PRI_FIRST + 1,
++		.hooknum = NF_INET_PRE_ROUTING,
++		.priority = NF_IP_PRI_CONNTRACK + 2,
+ 	},
+ 	{
++		/* POST_ROUTING: count downloads by egress device, covering both
++		 * normal WAN->LAN FORWARD and UA3F proxy OUTPUT to LAN clients */
+ 		.hook = af_client_hook2,
+ 		.pf = NFPROTO_INET,
+-		.hooknum = NF_INET_FORWARD,
++		.hooknum = NF_INET_POST_ROUTING,
+ 		.priority = NF_IP_PRI_LAST - 1,
+ 	},
+ 

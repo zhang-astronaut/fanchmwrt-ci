@@ -1,0 +1,143 @@
+name: Auto Build FanchmWrt
+
+on:
+  workflow_dispatch:   # 手动触发（强制重建）
+  schedule:
+    - cron: '17 */6 * * *'   # 每 6 小时检查一次上游更新
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Check upstream updates
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.c.outputs.build }}
+      sha: ${{ steps.c.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: c
+        name: Compare upstream HEAD with last built sha
+        run: |
+          set -e
+          BRANCH=$(curl -sf https://api.github.com/repos/fanchmwrt/fanchmwrt | jq -r .default_branch)
+          SHA=$(curl -sf "https://api.github.com/repos/fanchmwrt/fanchmwrt/commits/$BRANCH" | jq -r .sha)
+          echo "upstream $BRANCH HEAD: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          OLD=$(cat upstream_sha 2>/dev/null || true)
+          echo "last built sha: ${OLD:-<none>}"
+          if [ "$OLD" = "$SHA" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "no upstream update, skip build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build firmware images
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      SHA: ${{ needs.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 1024
+          remove-android: 'true'
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3 python3-setuptools rsync unzip zlib1g-dev file wget swig \
+            qemu-utils jq curl
+
+      - name: Clone upstream at recorded sha
+        run: |
+          git clone --depth 1 https://github.com/fanchmwrt/fanchmwrt.git openwrt
+          cd openwrt
+          git log --oneline -1
+
+      - name: Apply fwx TPROXY stats patch + custom config
+        run: |
+          cd openwrt
+          if [ -f ../fwx-tproxy-stat.patch ]; then
+            git apply --check ../fwx-tproxy-stat.patch 2>/dev/null && \
+              git apply ../fwx-tproxy-stat.patch || \
+              patch -p1 --forward < ../fwx-tproxy-stat.patch || \
+              echo "WARN: patch no longer applies cleanly (upstream changed fwx), continuing without it"
+          fi
+          cp ../fanchmwrt.config .config
+
+      - name: Update feeds
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: defconfig + download
+        run: |
+          cd openwrt
+          make defconfig
+          make download -j$(nproc)
+          find dl -size -1024c -exec rm -f {} \; || true
+
+      - name: Build firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) || make -j1 V=s
+
+      - name: Convert to VHD / VHDX
+        run: |
+          cd openwrt/bin/targets/x86/64
+          mkdir -p images
+          for img in *-combined-*.img.gz; do
+            [ -e "$img" ] || continue
+            base=$(basename "$img" .img.gz)
+            gunzip -c "$img" > "images/$base.img"
+            qemu-img convert -O vhdx "images/$base.img" "images/$base.vhdx"
+            qemu-img convert -O vpc "images/$base.img" "images/$base.vhd"
+            rm -f "images/$base.img"
+          done
+          cp *.img.gz images/ 2>/dev/null || true
+          cp *.manifest images/ 2>/dev/null || true
+          cp sha256sums images/ 2>/dev/null || true
+          cd images && sha256sum * > sha256sums.txt
+
+      - name: Record built upstream sha
+        run: |
+          echo "$SHA" > upstream_sha
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add upstream_sha
+          git commit -m "chore: built upstream $SHA [skip ci]" || true
+          git push || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fanchmwrt-images-${{ github.run_number }}
+          path: openwrt/bin/targets/x86/64/images/
+          retention-days: 14
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: r${{ github.run_number }}
+          name: FanchmWrt build r${{ github.run_number }}
+          body: |
+            基于上游 fanchmwrt/fanchmwrt @ `${{ needs.check.outputs.sha }}` 自动编译。
+            - 已应用 fwx TPROXY 流量统计补丁
+            - 配置见仓库 fanchmwrt.config（4G 分区 / Docker / UA3F 全套 kmod / 应用中心）
+          files: openwrt/bin/targets/x86/64/images/*
