@@ -43,8 +43,7 @@ jobs:
     env:
       SHA: ${{ needs.check.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
-
+      # 必须在 checkout 之前：该动作会清空 $GITHUB_WORKSPACE 并挂载 LVM 卷
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
         with:
@@ -54,6 +53,8 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
           remove-docker-images: 'true'
+
+      - uses: actions/checkout@v4
 
       - name: Install build dependencies
         run: |
@@ -72,13 +73,14 @@ jobs:
       - name: Apply fwx TPROXY stats patch + custom config
         run: |
           cd openwrt
-          if [ -f ../fwx-tproxy-stat.patch ]; then
-            git apply --check ../fwx-tproxy-stat.patch 2>/dev/null && \
-              git apply ../fwx-tproxy-stat.patch || \
-              patch -p1 --forward < ../fwx-tproxy-stat.patch || \
+          PATCH="$GITHUB_WORKSPACE/fwx-tproxy-stat.patch"
+          if [ -f "$PATCH" ]; then
+            git apply --check "$PATCH" 2>/dev/null && \
+              git apply "$PATCH" || \
+              patch -p1 --forward < "$PATCH" || \
               echo "WARN: patch no longer applies cleanly (upstream changed fwx), continuing without it"
           fi
-          cp ../fanchmwrt.config .config
+          cp "$GITHUB_WORKSPACE/fanchmwrt.config" .config
 
       - name: Update feeds
         run: |
