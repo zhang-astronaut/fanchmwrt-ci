@@ -2,6 +2,8 @@ name: Auto Build FanchmWrt
 
 on:
   workflow_dispatch:   # 手动触发（强制重建）
+  push:
+    branches: [main]   # 配置变更推送后立即编译验证（bot 提交带 [skip ci] 不会循环触发）
   schedule:
     - cron: '17 */6 * * *'   # 每 6 小时检查一次上游更新
 
@@ -69,6 +71,27 @@ jobs:
           git clone --depth 1 https://github.com/fanchmwrt/fanchmwrt.git openwrt
           cd openwrt
           git log --oneline -1
+
+      - name: Add passwall2 / UA3F feeds
+        run: |
+          cd openwrt
+          # passwall2 + 其依赖包 feed（上游 fanchmwrt 不含，需手动添加）
+          cat >> feeds.conf.default <<'EOF'
+          src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main
+          src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main
+          EOF
+          # UA3F 官方源码直接作为 package（含 LuCI 界面，非标准 feed 布局）
+          git clone --depth 1 https://github.com/SunBK201/UA3F.git package/UA3F
+          # Build/Prepare 直接调 po2lmo，显式依赖 luci-base/host（该 host 工具的来源）
+          sed -i 's/^PKG_BUILD_DEPENDS:=golang\/host$/PKG_BUILD_DEPENDS:=golang\/host luci-base\/host/' \
+            package/UA3F/openwrt/Makefile
+          # 关键补丁：UA3F 开机竞态修复
+          # 根因：开机时 WAN 默认路由未就绪 → BPF TC "no eligible interfaces" → 连崩
+          # procd 默认只重试 5 次即放弃 → UA3F 永久躺平（校园网看到裸 UA → 封禁）
+          # 修复：respawn 第三参数 0 = 无限重试，等路由就绪后自动恢复
+          sed -i 's/^    procd_set_param respawn$/    procd_set_param respawn 3600 5 0/' \
+            package/UA3F/openwrt/files/ua3f.init
+          grep -n 'procd_set_param respawn' package/UA3F/openwrt/files/ua3f.init
 
       - name: Apply fwx TPROXY stats patch + custom config
         run: |
@@ -141,5 +164,9 @@ jobs:
           body: |
             基于上游 fanchmwrt/fanchmwrt @ `${{ needs.check.outputs.sha }}` 自动编译。
             - 已应用 fwx TPROXY 流量统计补丁
+            - 内置 UA3F（含 LuCI 界面 + 开机竞态无限重试修复）
+            - 内置 PassWall2 + LuCI 界面 + xray-core / sing-box 双核心
             - 配置见仓库 fanchmwrt.config（4G 分区 / Docker / UA3F 全套 kmod / 应用中心）
+            - ⚠️ UA3F 与 PassWall2 共存注意：PassWall2 的 TCP 代理方式请保持默认 redirect，
+              勿改 tproxy（会与 UA3F 的 TPROXY 在 mangle PREROUTING 抢包）
           files: openwrt/bin/targets/x86/64/images/*
