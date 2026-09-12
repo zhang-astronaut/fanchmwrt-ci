@@ -118,7 +118,33 @@ jobs:
         run: |
           cd openwrt
           make defconfig
-          echo "===== kconfig 计划冲突/依赖求值 ====="
+          echo "===== A) 原始 kconfig 文本（带行号） ====="
+          F=tmp/.config-package.in
+          wc -l "$F"
+          for s in PACKAGE_ua3f PACKAGE_ttyd PACKAGE_docker PACKAGE_xray-core; do
+            echo "########## $s ##########"
+            awk -v pat="(menu)?config $s$" '$0 ~ pat {f=NR} {b[NR]=$0} END {if (f) {for (i=f-8;i<=f+14;i++) if (i>0 && i<=NR) printf "%d|%s\n", i, b[i]} else print "NOT FOUND"}' "$F"
+          done
+          echo "===== B) 这些符号在 kconfig 里被谁引用过 ====="
+          grep -n "PACKAGE_ttyd\|PACKAGE_docker\b" "$F" | head -20
+          echo "===== C) 手动跑 kconfig defconfig，看有无 warning ====="
+          cp .config tmp/.config
+          ./scripts/config/conf --defconfig=tmp/.config -w tmp/.config Config.in 2>&1 | tail -30
+          echo "===== D) 试验：追加 =y 后用 olddefconfig 能否保住 ====="
+          for s in luci-app-passwall2 xray-core sing-box geoview tcping v2ray-geoip v2ray-geosite docker dockerd luci-app-dockerman luci-app-fwx-app-center ttyd btrfs-progs; do
+            sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
+            echo "CONFIG_PACKAGE_${s}=y" >> .config
+          done
+          ./scripts/config/conf --olddefconfig Config.in > /dev/null 2>&1 || true
+          echo "--- olddefconfig 之后的状态 ---"
+          for s in luci-app-passwall2 xray-core sing-box docker dockerd ttyd ua3f; do
+            if grep -q "^CONFIG_PACKAGE_${s}=y" .config; then echo "OK   ${s}=y"
+            elif grep -q "^# CONFIG_PACKAGE_${s} is not set" .config; then echo "OFF  ${s}"
+            else echo "GONE ${s}"; fi
+          done
+          echo "===== 诊断结束，主动失败以节省时间 ====="
+          exit 1
+          echo "===== 旧版 python 依赖求值（保留） ====="
           python3 - <<'PY'
           import re
           cfg = {}
