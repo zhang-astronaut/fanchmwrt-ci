@@ -50,6 +50,7 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
         with:
+          # 3GB 已被新 runner 镜像占满导致 apt 报 "not enough free space"，实测需 8GB
           root-reserve-mb: 8192
           remove-android: 'true'
           remove-dotnet: 'true'
@@ -114,92 +115,41 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: defconfig + TEMP diagnostics
+      # ⚠️ 重要陷阱（2026-09-13 定位）：
+      # `make defconfig` 走的是 kconfig 的 --defconfig 模式，会把 fanchmwrt.config 里
+      # 一部分 =y 符号静默重置为 n（实测 26 个：docker 全家桶、luci-app-dockerman、
+      # luci-app-fwx-app-center、xray-core、sing-box、v2ray-geoip/geosite、geoview、tcping、
+      # luci-app-passwall2 及其依赖库等），既无 warning 也不报错，镜像照样编译成功、
+      # 照样发布 Release —— 结果就是"编译成功但包里没有 passwall2"。
+      # 已排除：依赖不满足（同内容 --olddefconfig 全部保留）、符号不存在、重复条目、CRLF、
+      # 架构条件（x86_64=y）。因此这里在 defconfig 之后强制回填 + olddefconfig 固化，
+      # 并用断言把"静默丢失"变成"立即失败"。
+      - name: defconfig + enforce required packages
         run: |
           cd openwrt
           make defconfig
-          echo "===== A) 原始 kconfig 文本（带行号） ====="
-          F=tmp/.config-package.in
-          wc -l "$F"
-          for s in PACKAGE_ua3f PACKAGE_ttyd PACKAGE_docker PACKAGE_xray-core; do
-            echo "########## $s ##########"
-            awk -v pat="(menu)?config $s$" '$0 ~ pat {f=NR} {b[NR]=$0} END {if (f) {for (i=f-8;i<=f+14;i++) if (i>0 && i<=NR) printf "%d|%s\n", i, b[i]} else print "NOT FOUND"}' "$F"
-          done
-          echo "===== B) 这些符号在 kconfig 里被谁引用过 ====="
-          grep -n "PACKAGE_ttyd\|PACKAGE_docker\b" "$F" | head -20
-          echo "===== C) 手动跑 kconfig defconfig，看有无 warning ====="
-          cp .config tmp/.config
-          ./scripts/config/conf --defconfig=tmp/.config -w tmp/.config Config.in 2>&1 | tail -30
-          echo "===== D) 试验：追加 =y 后用 olddefconfig 能否保住 ====="
-          for s in luci-app-passwall2 xray-core sing-box geoview tcping v2ray-geoip v2ray-geosite docker dockerd luci-app-dockerman luci-app-fwx-app-center ttyd btrfs-progs; do
+          REQUIRED="ua3f luci-app-passwall2 luci-i18n-passwall2-zh-cn \
+                    xray-core sing-box geoview tcping v2ray-geoip v2ray-geosite lyaml \
+                    docker dockerd docker-compose containerd runc tini btrfs-progs ttyd \
+                    luci-app-dockerman luci-i18n-dockerman-zh-cn \
+                    luci-app-fwx-app-center luci-i18n-fwx-app-center-zh-cn \
+                    libattr liblzo libseccomp libuv libwebsockets-full libnetfilter-queue"
+          for s in $REQUIRED; do
             sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
-            echo "CONFIG_PACKAGE_${s}=y" >> .config
+            grep -q "^CONFIG_PACKAGE_${s}=y$" .config || echo "CONFIG_PACKAGE_${s}=y" >> .config
           done
-          ./scripts/config/conf --olddefconfig Config.in > /dev/null 2>&1 || true
-          echo "--- olddefconfig 之后的状态 ---"
-          for s in luci-app-passwall2 xray-core sing-box docker dockerd ttyd ua3f; do
-            if grep -q "^CONFIG_PACKAGE_${s}=y" .config; then echo "OK   ${s}=y"
-            elif grep -q "^# CONFIG_PACKAGE_${s} is not set" .config; then echo "OFF  ${s}"
-            else echo "GONE ${s}"; fi
+          ./scripts/config/conf --olddefconfig Config.in
+          fail=0
+          for s in $REQUIRED; do
+            if grep -q "^CONFIG_PACKAGE_${s}=y$" .config; then
+              echo "  OK   $s"
+            else
+              echo "  FAIL $s 未生效（依赖被裁剪？）"; fail=1
+            fi
           done
-          echo "===== 诊断结束，主动失败以节省时间 ====="
-          exit 1
-          echo "===== 旧版 python 依赖求值（保留） ====="
-          python3 - <<'PY'
-          import re
-          cfg = {}
-          for l in open('.config', encoding='utf-8', errors='replace'):
-              s = l.strip()
-              m = re.match(r'^# CONFIG_(PACKAGE_[^ ]+) is not set$', s)
-              if m:
-                  cfg[m.group(1)] = 'n'
-                  continue
-              m = re.match(r'^CONFIG_(PACKAGE_[^=]+)=(.*)$', s)
-              if m:
-                  cfg[m.group(1)] = m.group(2).strip('"')
-          txt = open('tmp/.config-package.in', encoding='utf-8', errors='replace').read()
-          blocks = {}
-          cur = None
-          for line in txt.splitlines():
-              m = re.match(r'^[ \t]*(?:menu)?config (PACKAGE_\S+)\s*$', line)
-              if m:
-                  cur = m.group(1)
-                  blocks[cur] = []
-                  continue
-              if cur is not None:
-                  if re.match(r'^[ \t]*(?:menu)?config ', line) or line.startswith('menu '):
-                      cur = None
-                  else:
-                      blocks[cur].append(line)
-          print('kconfig 里的 PACKAGE_ 符号总数:', len(blocks))
-          targets = ['PACKAGE_luci-app-passwall2','PACKAGE_xray-core','PACKAGE_sing-box','PACKAGE_geoview',
-                     'PACKAGE_tcping','PACKAGE_docker','PACKAGE_dockerd','PACKAGE_luci-app-dockerman',
-                     'PACKAGE_luci-app-fwx-app-center','PACKAGE_ttyd','PACKAGE_btrfs-progs','PACKAGE_ua3f']
-          for t in targets:
-              blk = blocks.get(t)
-              print('=' * 70)
-              print('###', t, '存在' if blk is not None else '**不在 kconfig**', '当前值=', cfg.get(t, '<缺>'))
-              if not blk:
-                  continue
-              for line in blk:
-                  ls = line.strip()
-                  if ls.startswith('depends on') or ls.startswith('select'):
-                      print('   ', ls)
-                      if 'depends on' in ls:
-                          for ref in re.findall(r'PACKAGE_[A-Za-z0-9_.+\-]+', ls):
-                              print('        ->', ref, '=', cfg.get(ref, '<缺>'))
-          print('=' * 70)
-          print('### 全局：所有含 "!= y" 冲突约束且被 =y 包触发的符号')
-          for sym, blk in blocks.items():
-              for line in blk:
-                  ls = line.strip()
-                  if ls.startswith('depends on') and '!= y' in ls:
-                      for ref in re.findall(r'PACKAGE_[A-Za-z0-9_.+\-]+', ls):
-                          if cfg.get(ref) == 'y':
-                              print(f'   {sym}  被  {ls}  限制（{ref}=y）')
-          PY
-          echo "===== 诊断结束，主动失败以节省时间 ====="
-          exit 1
+          [ "$fail" = "0" ] || { echo "关键包未进入配置，终止编译"; exit 1; }
+          make download -j$(nproc)
+          find dl -size -1024c -exec rm -f {} \; || true
 
       - name: Build firmware
         run: |
@@ -250,6 +200,7 @@ jobs:
             - 内置 UA3F（含 LuCI 界面 + 开机竞态无限重试修复）
             - 内置 PassWall2 + LuCI 界面 + xray-core / sing-box 双核心
             - 配置见仓库 fanchmwrt.config（4G 分区 / Docker / UA3F 全套 kmod / 应用中心）
+            - 编译时对 defconfig 静默丢包做了强制回填 + 断言校验（见 workflow）
             - ⚠️ UA3F 与 PassWall2 共存注意：PassWall2 的 TCP 代理方式请保持默认 redirect，
               勿改 tproxy（会与 UA3F 的 TPROXY 在 mangle PREROUTING 抢包）
           files: openwrt/bin/targets/x86/64/images/*
