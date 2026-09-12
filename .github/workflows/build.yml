@@ -118,29 +118,60 @@ jobs:
         run: |
           cd openwrt
           make defconfig
-          echo "===== 1) 目标符号在 defconfig 后的 .config 中的状态 ====="
-          for s in luci-app-passwall2 luci-i18n-passwall2-zh-cn xray-core sing-box geoview tcping v2ray-geoip v2ray-geosite lyaml docker dockerd luci-app-dockerman luci-app-fwx-app-center ttyd btrfs-progs ua3f; do
-            if grep -q "^CONFIG_PACKAGE_${s}=y" .config; then echo "OK   ${s}=y"
-            elif grep -q "^CONFIG_PACKAGE_${s}=m" .config; then echo "MOD  ${s}=m"
-            elif grep -q "^# CONFIG_PACKAGE_${s} is not set" .config; then echo "OFF  ${s} (is not set)"
-            else echo "GONE ${s} (符号不存在)"; fi
-          done
-          echo "===== 2) kconfig 里符号定义（看 depends/select） ====="
-          for s in PACKAGE_luci-app-passwall2 PACKAGE_docker PACKAGE_xray-core PACKAGE_ua3f; do
-            echo "----- config ${s} -----"
-            grep -n -A10 "^config ${s}$" tmp/.config-package.in || echo "(不在 tmp/.config-package.in)"
-          done
-          echo "===== 3) feeds 是否真的安装（符号链接） ====="
-          ls -l package/feeds/ 2>/dev/null | head -40
-          echo "--- passwall2 ---"; ls -l package/feeds/passwall2/ 2>/dev/null | head
-          echo "--- packages/docker ---"; ls -l package/feeds/packages/docker 2>/dev/null | head -5
-          echo "--- fanchmwrt app-center ---"; ls -l package/feeds/fanchmwrt/ 2>/dev/null | head -20
-          echo "===== 4) defconfig 相对仓库配置删掉了哪些 CONFIG_PACKAGE_*=y ====="
-          grep -E '^CONFIG_PACKAGE_[^=]+=y$' "$GITHUB_WORKSPACE/fanchmwrt.config" | sort > /tmp/want.txt
-          grep -E '^CONFIG_PACKAGE_[^=]+=y$' .config | sort > /tmp/got.txt
-          echo "want=$(wc -l < /tmp/want.txt) got=$(wc -l < /tmp/got.txt)"
-          echo "--- 被删掉的（want 有 got 没有） ---"
-          comm -23 /tmp/want.txt /tmp/got.txt
+          echo "===== kconfig 计划冲突/依赖求值 ====="
+          python3 - <<'PY'
+          import re
+          cfg = {}
+          for l in open('.config', encoding='utf-8', errors='replace'):
+              s = l.strip()
+              m = re.match(r'^# CONFIG_(PACKAGE_[^ ]+) is not set$', s)
+              if m:
+                  cfg[m.group(1)] = 'n'
+                  continue
+              m = re.match(r'^CONFIG_(PACKAGE_[^=]+)=(.*)$', s)
+              if m:
+                  cfg[m.group(1)] = m.group(2).strip('"')
+          txt = open('tmp/.config-package.in', encoding='utf-8', errors='replace').read()
+          blocks = {}
+          cur = None
+          for line in txt.splitlines():
+              m = re.match(r'^[ \t]*(?:menu)?config (PACKAGE_\S+)\s*$', line)
+              if m:
+                  cur = m.group(1)
+                  blocks[cur] = []
+                  continue
+              if cur is not None:
+                  if re.match(r'^[ \t]*(?:menu)?config ', line) or line.startswith('menu '):
+                      cur = None
+                  else:
+                      blocks[cur].append(line)
+          print('kconfig 里的 PACKAGE_ 符号总数:', len(blocks))
+          targets = ['PACKAGE_luci-app-passwall2','PACKAGE_xray-core','PACKAGE_sing-box','PACKAGE_geoview',
+                     'PACKAGE_tcping','PACKAGE_docker','PACKAGE_dockerd','PACKAGE_luci-app-dockerman',
+                     'PACKAGE_luci-app-fwx-app-center','PACKAGE_ttyd','PACKAGE_btrfs-progs','PACKAGE_ua3f']
+          for t in targets:
+              blk = blocks.get(t)
+              print('=' * 70)
+              print('###', t, '存在' if blk is not None else '**不在 kconfig**', '当前值=', cfg.get(t, '<缺>'))
+              if not blk:
+                  continue
+              for line in blk:
+                  ls = line.strip()
+                  if ls.startswith('depends on') or ls.startswith('select'):
+                      print('   ', ls)
+                      if 'depends on' in ls:
+                          for ref in re.findall(r'PACKAGE_[A-Za-z0-9_.+\-]+', ls):
+                              print('        ->', ref, '=', cfg.get(ref, '<缺>'))
+          print('=' * 70)
+          print('### 全局：所有含 "!= y" 冲突约束且被 =y 包触发的符号')
+          for sym, blk in blocks.items():
+              for line in blk:
+                  ls = line.strip()
+                  if ls.startswith('depends on') and '!= y' in ls:
+                      for ref in re.findall(r'PACKAGE_[A-Za-z0-9_.+\-]+', ls):
+                          if cfg.get(ref) == 'y':
+                              print(f'   {sym}  被  {ls}  限制（{ref}=y）')
+          PY
           echo "===== 诊断结束，主动失败以节省时间 ====="
           exit 1
 
