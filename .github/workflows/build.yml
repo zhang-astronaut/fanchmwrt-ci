@@ -29,7 +29,8 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           OLD=$(cat upstream_sha 2>/dev/null || true)
           echo "last built sha: ${OLD:-<none>}"
-          if [ "$OLD" = "$SHA" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+          # 只有定时任务才按 sha 比对跳过；手动触发和 push（配置变更）一律编译
+          if [ "$OLD" = "$SHA" ] && [ "${{ github.event_name }}" = "schedule" ]; then
             echo "no upstream update, skip build"
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
