@@ -114,12 +114,35 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: defconfig + download
+      - name: defconfig + TEMP diagnostics
         run: |
           cd openwrt
           make defconfig
-          make download -j$(nproc)
-          find dl -size -1024c -exec rm -f {} \; || true
+          echo "===== 1) 目标符号在 defconfig 后的 .config 中的状态 ====="
+          for s in luci-app-passwall2 luci-i18n-passwall2-zh-cn xray-core sing-box geoview tcping v2ray-geoip v2ray-geosite lyaml docker dockerd luci-app-dockerman luci-app-fwx-app-center ttyd btrfs-progs ua3f; do
+            if grep -q "^CONFIG_PACKAGE_${s}=y" .config; then echo "OK   ${s}=y"
+            elif grep -q "^CONFIG_PACKAGE_${s}=m" .config; then echo "MOD  ${s}=m"
+            elif grep -q "^# CONFIG_PACKAGE_${s} is not set" .config; then echo "OFF  ${s} (is not set)"
+            else echo "GONE ${s} (符号不存在)"; fi
+          done
+          echo "===== 2) kconfig 里符号定义（看 depends/select） ====="
+          for s in PACKAGE_luci-app-passwall2 PACKAGE_docker PACKAGE_xray-core PACKAGE_ua3f; do
+            echo "----- config ${s} -----"
+            grep -n -A10 "^config ${s}$" tmp/.config-package.in || echo "(不在 tmp/.config-package.in)"
+          done
+          echo "===== 3) feeds 是否真的安装（符号链接） ====="
+          ls -l package/feeds/ 2>/dev/null | head -40
+          echo "--- passwall2 ---"; ls -l package/feeds/passwall2/ 2>/dev/null | head
+          echo "--- packages/docker ---"; ls -l package/feeds/packages/docker 2>/dev/null | head -5
+          echo "--- fanchmwrt app-center ---"; ls -l package/feeds/fanchmwrt/ 2>/dev/null | head -20
+          echo "===== 4) defconfig 相对仓库配置删掉了哪些 CONFIG_PACKAGE_*=y ====="
+          grep -E '^CONFIG_PACKAGE_[^=]+=y$' "$GITHUB_WORKSPACE/fanchmwrt.config" | sort > /tmp/want.txt
+          grep -E '^CONFIG_PACKAGE_[^=]+=y$' .config | sort > /tmp/got.txt
+          echo "want=$(wc -l < /tmp/want.txt) got=$(wc -l < /tmp/got.txt)"
+          echo "--- 被删掉的（want 有 got 没有） ---"
+          comm -23 /tmp/want.txt /tmp/got.txt
+          echo "===== 诊断结束，主动失败以节省时间 ====="
+          exit 1
 
       - name: Build firmware
         run: |
