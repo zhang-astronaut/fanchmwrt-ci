@@ -8,8 +8,11 @@
   并应用**开机竞态修复**——原版 init 脚本 procd respawn 默认只重试 5 次，
   开机时 WAN 默认路由未就绪会导致 BPF TC 初始化失败连崩 6 次后被 procd 永久放弃
   （校园网看到裸 UA 导致封禁的根因）。修复为无限重试，路由就绪后自动恢复。
-- **PassWall2（内置）**：luci-app-passwall2 + 中文语言包 + xray-core / sing-box 双核心，
-  开箱即用（feed 取自 [Openwrt-Passwall](https://github.com/Openwrt-Passwall)）。
+- **PassWall（内置）**：luci-app-passwall + 中文语言包 + xray-core / sing-box 双核心，
+  开箱即用（feed 取自 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall)，
+  注意是 PassWall 而非 PassWall2）。
+- **MT7922 USB 无线**：kmod-mt7921u + kmod-mt7922-firmware + wpad-basic-mbedtls
+  （识别 `0489:e0d8` MediaTek Wireless_Device）。
 - **UA3F 全套依赖**：kmod-ipt-nfqueue、kmod-nfnetlink-queue、iptables-mod-nfqueue、
   kmod-ipt-tproxy/ipopt/conntrack-extra（+对应 iptables-mod-*）、iptables-mod-extra、
   ipset、kmod-ipt-ipset、kmod-nf-conntrack-netlink、kmod-nft-queue/nft-socket/nft-tproxy、
@@ -22,16 +25,16 @@
 - **FanchmWrt 原生应用中心**：luci-app-fwx-app-center（含中文）
 - **rootfs 4G**（首次开机自动扩容到整盘）
 
-## UA3F 与 PassWall2 共存说明（重要）
+## UA3F 与 PassWall 共存说明（重要）
 
-两者可以同时运行，数据流为：`LAN 客户端 → UA3F(TPROXY 改写 UA) → PassWall2(加密出口)`。
+两者可以同时运行，数据流为：`LAN 客户端 → UA3F(TPROXY 改写 UA) → PassWall(加密出口)`。
 已验证的共存要点：
 
-1. **PassWall2 的 TCP 代理方式保持默认 `redirect`**，不要改成 `tproxy`——
+1. **PassWall 的 TCP 代理方式保持默认 `redirect`**，不要改成 `tproxy`——
    会与 UA3F 的 TPROXY 在 mangle/PREROUTING 抢包。
-2. 端口无冲突（UA3F 监听 1080 / PassWall2 SOCKS 1070）。
-3. 启动顺序无冲突（同为 S99，PassWall2 自带 60s 延迟，UA3F 无限 respawn 兜底）。
-4. `localhost_proxy` 开启时 PassWall2 会接管 UA3F 的出站流量——这是预期行为
+2. 端口无冲突（UA3F 监听 1080 / PassWall SOCKS 默认端口见 LuCI，勿与 1080 重叠）。
+3. 启动顺序无冲突（同为 S99，PassWall 自带启动延迟，UA3F 无限 respawn 兜底）。
+4. 本机代理开启时 PassWall 会接管 UA3F 的出站流量——这是预期行为
    （改写完 UA 再走节点加密出口），但节点故障时会影响 UA3F 出站，排查时注意。
 
 ## 文件说明
