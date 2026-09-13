@@ -50,25 +50,31 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
         with:
-          # 3GB 已被新 runner 镜像占满导致 apt 报 "not enough free space"，实测需 8GB
-          root-reserve-mb: 8192
+          # runner 镜像持续变大：8192 仍会把 /var/cache/apt/archives 挤满（run 23 exit 100）
+          root-reserve-mb: 16384
           remove-android: 'true'
           remove-dotnet: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
           remove-docker-images: 'true'
+          remove-large-packages: 'true'
 
       - uses: actions/checkout@v4
 
       - name: Install build dependencies
         run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL 2>/dev/null || true
           sudo apt-get clean
+          sudo rm -rf /var/cache/apt/archives/*
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential clang flex bison g++ gawk \
             gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
             python3 python3-setuptools rsync unzip zlib1g-dev file wget swig \
             qemu-utils jq curl
+          sudo apt-get clean
+          sudo rm -rf /var/cache/apt/archives/*
 
       - name: Clone upstream at recorded sha
         run: |
