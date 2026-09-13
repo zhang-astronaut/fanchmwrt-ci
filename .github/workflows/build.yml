@@ -133,7 +133,8 @@ jobs:
                     docker dockerd docker-compose containerd runc tini btrfs-progs ttyd \
                     luci-app-dockerman luci-i18n-dockerman-zh-cn \
                     luci-app-fwx-app-center luci-i18n-fwx-app-center-zh-cn \
-                    libattr liblzo libseccomp libuv libwebsockets-full libnetfilter-queue"
+                    libattr liblzo libseccomp libuv libwebsockets-full libnetfilter-queue \
+                    kmod-mt7921u kmod-mt7922-firmware wpad-basic-mbedtls"
           for s in $REQUIRED; do
             sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
             grep -q "^CONFIG_PACKAGE_${s}=y$" .config || echo "CONFIG_PACKAGE_${s}=y" >> .config
