@@ -13,6 +13,8 @@
   注意是 PassWall 而非 PassWall2）。
 - **MT7922 USB 无线**：kmod-mt7921u + kmod-mt7922-firmware + wpad-basic-mbedtls
   （识别 `0489:e0d8` MediaTek Wireless_Device）。
+- **用户会话统计（TPROXY 兼容）**：`user-sessiond-ct` 用 conntrack+ARP 聚合每 MAC 会话数，
+  顶替闭源 `user_sessiond`（其依赖的 `fwx_user.ko` 在 UA3F TPROXY 下会话表恒为空）。
 - **UA3F 全套依赖**：kmod-ipt-nfqueue、kmod-nfnetlink-queue、iptables-mod-nfqueue、
   kmod-ipt-tproxy/ipopt/conntrack-extra（+对应 iptables-mod-*）、iptables-mod-extra、
   ipset、kmod-ipt-ipset、kmod-nf-conntrack-netlink、kmod-nft-queue/nft-socket/nft-tproxy、
