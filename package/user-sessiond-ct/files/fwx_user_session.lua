@@ -14,6 +14,7 @@ end
 
 local HIST_MAX = 1440
 local HIST_FILE = "/tmp/user_session_hist.json"
+local HIST_SAVE_TS = "/tmp/user_session_hist.saved"
 local hist = { t = {}, macs = {} }
 local last_sample = 0
 
@@ -186,6 +187,7 @@ local function parse_sessions(arp, apps)
 end
 
 local SNAP_TTL = 2
+local SNAP_FILE = "/tmp/us_snap.tsv"
 local last_save = 0
 local snap_cache = { ts = 0 }
 
@@ -215,17 +217,75 @@ local function snapshot_now()
     return list, rows, total_sessions
 end
 
--- 2s cache: LuCI fires list+history+detail in a burst; reuse one parse.
-local function snapshot()
+local function load_snap_file()
+    local f = io.open(SNAP_FILE, "r")
+    if not f then return nil end
+    local ts = tonumber(f:read("*l") or "")
+    local total = tonumber(f:read("*l") or "")
+    if not ts or not total then f:close(); return nil end
+    if os.time() - ts >= SNAP_TTL then f:close(); return nil end
+    local list = {}
+    for line in f:lines() do
+        local mac, sc, tc, uc, oc = line:match("^(%S+)\t(%d+)\t(%d+)\t(%d+)\t(%d+)$")
+        if mac then
+            list[#list+1] = {
+                mac = mac, hostname = "", nickname = "", online = 1,
+                session_count = tonumber(sc) or 0,
+                tcp_count = tonumber(tc) or 0,
+                udp_count = tonumber(uc) or 0,
+                other_count = tonumber(oc) or 0,
+            }
+        end
+    end
+    f:close()
+    return ts, list, total
+end
+
+local function save_snap_file(list, total)
+    local f = io.open(SNAP_FILE, "w")
+    if not f then return end
+    f:write(os.time(), "\n", total, "\n")
+    for _, u in ipairs(list) do
+        f:write(u.mac, "\t", u.session_count, "\t", u.tcp_count, "\t", u.udp_count, "\t", u.other_count, "\n")
+    end
+    f:close()
+end
+
+-- 2s cache across requests (uhttpd may fork per XHR — file fallback).
+-- list/total: cached; rows: only built when caller needs detail.
+local function snapshot_list()
     local t = os.time()
-    if snap_cache.ts ~= 0 and (t - snap_cache.ts) < SNAP_TTL then
-        return snap_cache.list, snap_cache.rows, snap_cache.total
+    if snap_cache.ts ~= 0 and (t - snap_cache.ts) < SNAP_TTL and snap_cache.list then
+        return snap_cache.list, snap_cache.total
+    end
+    local fts, flist, ftotal = load_snap_file()
+    if fts and flist then
+        snap_cache.ts = fts
+        snap_cache.list = flist
+        snap_cache.total = ftotal
+        return flist, ftotal
     end
     local list, rows, total = snapshot_now()
     snap_cache.ts = t
     snap_cache.list = list
     snap_cache.rows = rows
     snap_cache.total = total
+    save_snap_file(list, total)
+    return list, total
+end
+
+local function snapshot_rows()
+    local _list, rows, _total = snapshot_now()
+    return rows
+end
+
+local function snapshot()
+    local list, total = snapshot_list()
+    local rows = snap_cache.rows
+    if not rows then
+        rows = snapshot_rows()
+        snap_cache.rows = rows
+    end
     return list, rows, total
 end
 
@@ -248,10 +308,18 @@ local function sample_history(total, list)
     end
     hist.t[#hist.t+1] = { ts = t, total = total, tcp = tt, udp = tu, other = to }
     if #hist.t > HIST_MAX then table.remove(hist.t, 1) end
-    -- /tmp is tmpfs; still avoid rewriting ~300KB every sample
-    if t - last_save >= 30 then
+    -- Throttle across CGI forks via sidecar timestamp
+    local last_ts = last_save
+    local sf = io.open(HIST_SAVE_TS, "r")
+    if sf then
+        last_ts = math.max(last_ts, tonumber(sf:read("*l") or "0") or 0)
+        sf:close()
+    end
+    if t - last_ts >= 30 then
         last_save = t
         save_hist()
+        local sf2 = io.open(HIST_SAVE_TS, "w")
+        if sf2 then sf2:write(tostring(t)) sf2:close() end
     end
 end
 
@@ -333,7 +401,7 @@ end
 
 function get_session_user_list()
     luci.http.prepare_content("application/json")
-    local list, _rows, total = snapshot()
+    local list, total = snapshot_list()
     sample_history(total, list)
     luci.http.write_json({ total_num = #list, list = list })
 end
@@ -376,7 +444,7 @@ function get_session_history()
     local range = tonumber(luci.http.formvalue("range") or "2") or 2
     if range ~= 1 and range ~= 2 and range ~= 3 then range = 2 end
     luci.http.prepare_content("application/json")
-    local list, _rows, total = snapshot()
+    local list, total = snapshot_list()
     sample_history(total, list)
     local step = (range == 1) and 5 or 60
     local cur_user = nil

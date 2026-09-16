@@ -42,6 +42,9 @@ define Package/user-sessiond-ct/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/user_sessiond $(1)/usr/bin/user-sessiond-ct
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/user-sessiond-ct.init $(1)/etc/init.d/user-sessiond-ct
+	# LuCI controller (conntrack session stats; overrides stock UserSession page backend)
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
+	$(INSTALL_DATA) ./files/fwx_user_session.lua $(1)/usr/lib/lua/luci/controller/fwx_user_session.lua
 endef
 
 $(eval $(call BuildPackage,user-sessiond-ct))
