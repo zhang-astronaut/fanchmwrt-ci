@@ -44,7 +44,97 @@ struct session_row {
 	unsigned long up_bytes;
 	unsigned long down_bytes;
 	char state[32];
+	char app_name[128];
+	char url[256];
 };
+
+struct app_entry {
+	char mac[32];
+	char src_ip[64];
+	int src_port;
+	char dst_ip[64];
+	int dst_port;
+	char app_name[128];
+	char url[256];
+};
+
+#define MAX_APPS 2048
+static struct app_entry apps[MAX_APPS];
+static int n_apps;
+
+static void mac_norm(const char *in, char *out, size_t n);
+
+static void load_apps(void)
+{
+	FILE *f = fopen("/proc/net/af_active_app", "r");
+	char line[1024];
+	n_apps = 0;
+	if (!f)
+		return;
+	if (!fgets(line, sizeof(line), f)) {
+		fclose(f);
+		return;
+	}
+	while (fgets(line, sizeof(line), f) && n_apps < MAX_APPS) {
+		unsigned appid = 0;
+		char mac[32], sip[64], dip[64], host[128], uri[256];
+		int sport = 0, dport = 0;
+		memset(host, 0, sizeof(host));
+		memset(uri, 0, sizeof(uri));
+		if (sscanf(line, "%u %31s %63s %d %63s %d",
+			   &appid, mac, sip, &sport, dip, &dport) < 6)
+			continue;
+		/* Host is a domain-like token; URI starts with / */
+		char *p;
+		for (p = line; *p; p++) {
+			if (*p == '/' && p > line && p[-1] == ' ') {
+				sscanf(p, "%255s", uri);
+				break;
+			}
+		}
+		/* pick last token that looks like a hostname (has a dot, no /) */
+		{
+			char *tok, *save = NULL;
+			char buf[1024];
+			snprintf(buf, sizeof(buf), "%s", line);
+			for (tok = strtok_r(buf, " \t\n", &save); tok;
+			     tok = strtok_r(NULL, " \t\n", &save)) {
+				if (strchr(tok, '.') && !strchr(tok, '/') &&
+				    !isdigit((unsigned char)tok[0])) {
+					snprintf(host, sizeof(host), "%s", tok);
+				}
+			}
+		}
+		struct app_entry *e = &apps[n_apps++];
+		mac_norm(mac, e->mac, sizeof(e->mac));
+		snprintf(e->src_ip, sizeof(e->src_ip), "%s", sip);
+		e->src_port = sport;
+		snprintf(e->dst_ip, sizeof(e->dst_ip), "%s", dip);
+		e->dst_port = dport;
+		if (host[0])
+			snprintf(e->app_name, sizeof(e->app_name), "%s", host);
+		else
+			snprintf(e->app_name, sizeof(e->app_name), "App %u", appid);
+		if (uri[0])
+			snprintf(e->url, sizeof(e->url), "%s", uri);
+		else
+			snprintf(e->url, sizeof(e->url), "%s", host);
+	}
+	fclose(f);
+}
+
+static struct app_entry *find_app(const char *mac, const char *sip, int sport,
+				  const char *dip, int dport)
+{
+	for (int i = 0; i < n_apps; i++) {
+		if (apps[i].src_port == sport && apps[i].dst_port == dport &&
+		    strcmp(apps[i].mac, mac) == 0 &&
+		    strcmp(apps[i].src_ip, sip) == 0 &&
+		    strcmp(apps[i].dst_ip, dip) == 0)
+			return &apps[i];
+	}
+	return NULL;
+}
 
 struct hist_point {
 	int total, tcp, udp, other;
@@ -156,6 +246,7 @@ static void scan_conntrack(const char *filter_mac, struct session_row *rows, int
 	char line[1024];
 	if (out_rows)
 		*out_rows = 0;
+	load_apps();
 	if (!f)
 		return;
 	for (int i = 0; i < n_clients; i++) {
@@ -243,6 +334,16 @@ static void scan_conntrack(const char *filter_mac, struct session_row *rows, int
 				r->up_bytes = bytes_out;
 				r->down_bytes = bytes_in;
 				snprintf(r->state, sizeof(r->state), "%s", state);
+				{
+					struct app_entry *ae = find_app(c->mac, src, sport, dst, dport);
+					if (ae) {
+						snprintf(r->app_name, sizeof(r->app_name), "%s", ae->app_name);
+						snprintf(r->url, sizeof(r->url), "%s", ae->url);
+					} else {
+						snprintf(r->app_name, sizeof(r->app_name), "-");
+						r->url[0] = 0;
+					}
+				}
 				(*out_rows)++;
 			}
 		}
@@ -500,6 +601,8 @@ static int handle_common(struct ubus_context *c, struct ubus_object *obj,
 			blobmsg_add_u64(&bb, "up_bytes", rows[i].up_bytes);
 			blobmsg_add_u64(&bb, "down_bytes", rows[i].down_bytes);
 			blobmsg_add_string(&bb, "state", rows[i].state);
+			blobmsg_add_string(&bb, "app_name", rows[i].app_name);
+			blobmsg_add_string(&bb, "url", rows[i].url);
 			blobmsg_close_table(&bb, t);
 		}
 		blobmsg_close_array(&bb, arr);
