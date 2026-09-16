@@ -137,8 +137,12 @@ static struct client_hist *hist_for(const char *mac)
 	}
 	for (int i = 0; i < MAX_CLIENTS; i++) {
 		if (!hists[i].used) {
+			size_t n = strlen(mac);
+			if (n >= sizeof(hists[i].mac))
+				n = sizeof(hists[i].mac) - 1;
 			hists[i].used = 1;
-			snprintf(hists[i].mac, sizeof(hists[i].mac), "%s", mac);
+			memcpy(hists[i].mac, mac, n);
+			hists[i].mac[n] = 0;
 			return &hists[i];
 		}
 	}

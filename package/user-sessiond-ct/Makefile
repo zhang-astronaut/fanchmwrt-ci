@@ -14,7 +14,7 @@ define Package/user-sessiond-ct
   SECTION:=net
   CATEGORY:=Network
   TITLE:=User session stats via conntrack (TPROXY-safe)
-  DEPENDS:=+libubox +libubus +libblobmsg-json
+  DEPENDS:=+libubox +libubus
 endef
 
 define Package/user-sessiond-ct/description
@@ -30,9 +30,11 @@ endef
 
 define Build/Compile
 	$(TARGET_CC) $(TARGET_CFLAGS) -Wall \
+		-I$(STAGING_DIR)/usr/include \
 		-o $(PKG_BUILD_DIR)/user_sessiond \
 		$(PKG_BUILD_DIR)/user_sessiond.c \
-		$(TARGET_LDFLAGS) -lubox -lubus -lblobmsg-json
+		-L$(STAGING_DIR)/usr/lib \
+		$(TARGET_LDFLAGS) -lubox -lubus
 endef
 
 define Package/user-sessiond-ct/install
