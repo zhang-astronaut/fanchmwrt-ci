@@ -114,10 +114,14 @@ jobs:
               echo "WARN: patch no longer applies cleanly (upstream changed fwx), continuing without it"
           fi
           cp "$GITHUB_WORKSPACE/fanchmwrt.config" .config
-          # conntrack-based user_sessiond（UA3F TPROXY 下 fwx_user.ko 会话表为空）
-          if [ -d "$GITHUB_WORKSPACE/package/user-sessiond-ct" ]; then
-            rm -rf package/user-sessiond-ct
-            cp -a "$GITHUB_WORKSPACE/package/user-sessiond-ct" package/
+          # local packages (user-sessiond-ct, srunpy, luci-app-srunpy, ...)
+          if [ -d "$GITHUB_WORKSPACE/package" ]; then
+            for d in "$GITHUB_WORKSPACE/package"/*; do
+              [ -d "$d" ] || continue
+              name=$(basename "$d")
+              rm -rf "package/$name"
+              cp -a "$d" "package/"
+            done
           fi
 
       - name: Update feeds
@@ -147,7 +151,8 @@ jobs:
                     luci-app-fwx-app-center luci-i18n-fwx-app-center-zh-cn \
                     libattr liblzo libseccomp libuv libwebsockets-full libnetfilter-queue \
                     kmod-mt7921u kmod-mt7922-firmware wpad-basic-mbedtls \
-                    user-sessiond-ct"
+                    user-sessiond-ct \
+                    srunpy luci-app-srunpy python3-requests"
           for s in $REQUIRED; do
             sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
             grep -q "^CONFIG_PACKAGE_${s}=y$" .config || echo "CONFIG_PACKAGE_${s}=y" >> .config
@@ -185,7 +190,21 @@ jobs:
           cp *.img.gz images/ 2>/dev/null || true
           cp *.manifest images/ 2>/dev/null || true
           cp sha256sums images/ 2>/dev/null || true
-          cd images && sha256sum * > sha256sums.txt
+
+      - name: Fetch SRunPy release packages
+        run: |
+          # Always attach upstream SRunPy apk/ipk to this firmware Release
+          # (also baked into image via package/srunpy + luci-app-srunpy)
+          set -e
+          DEST="openwrt/bin/targets/x86_64/images"
+          if [ ! -d "$DEST" ]; then DEST="openwrt/bin/targets/x86/64/images"; fi
+          mkdir -p "$DEST"
+          BASE="https://github.com/HofNature/SRunPy-OpenWRT/releases/download/v1.0.1"
+          for f in srunpy-1.0.1-r1.apk luci-app-srunpy-1.0.0-r1.apk srunpy-1.0.1.ipk luci-app-srunpy-1.0.0.ipk; do
+            curl -fsSL -o "$DEST/$f" "$BASE/$f"
+            echo "got $DEST/$f ($(wc -c < "$DEST/$f") bytes)"
+          done
+          cd "$DEST" && sha256sum * > sha256sums.txt
 
       - name: Record built upstream sha
         run: |
@@ -214,6 +233,7 @@ jobs:
             - 内置 UA3F（含 LuCI 界面 + 开机竞态无限重试修复）
             - 内置 PassWall（非 PassWall2）+ LuCI 界面 + xray-core / sing-box 双核心
             - 内置 MT7922 USB 无线驱动（kmod-mt7921u + firmware + wpad）
+            - 内置 SRunPy 校园网自动登录（srunpy + luci-app-srunpy + python3-requests）；Release 附带上游 apk/ipk
             - 配置见仓库 fanchmwrt.config（4G 分区 / Docker / UA3F 全套 kmod / 应用中心）
             - 编译时对 defconfig 静默丢包做了强制回填 + 断言校验（见 workflow）
             - ⚠️ UA3F 与 PassWall 共存注意：PassWall 的 TCP 代理方式请保持默认 redirect，
