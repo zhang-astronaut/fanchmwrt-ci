@@ -1,14 +1,20 @@
 ---
 feature: monitor-io-opt
-status: in-progress
+status: delivered
 updated: 2026-09-16
 branch: feat/monitor-io-opt
-commits: 
+commits: be0bebe..902fa6a
 ---
 
 # Monitor I/O Optimization
 
 ## Report
+
+**What was built** — 评估了监控链路硬件压力，并落地内存侧优化：LuCI/user-sessiond 对 conntrack 的解析加 2 秒快照缓存；会话历史只在内存环形缓冲，落盘 `/tmp`（tmpfs）最多每 30 秒一次。未改 UA3F/PassWall，未把 hist 写到 eMMC。
+
+**Verification** — 路由器 `/tmp` 为 tmpfs；hist 文件 mtime 在 12s 观察窗口内未每 5s 刷新（11:38 → 仍为 11:38）；CPU 空闲约 97%；Lua 已含 `SNAP_TTL=2`、`last_save >= 30`。C 包 `user-sessiond-ct` 1.2.0 增加 `refresh_snapshot()`，待下一轮 CI 编译。
+
+**Journey log** — `/tmp` 是内存盘，反复写不伤闪存；真正重复的是 XHR 连发时多次全量解析 nf_conntrack；stock `user_sessiond` 仍空转但 CPU 可忽略，未强杀以免和应用中心打架。
 
 ## [S1] Problem
 
