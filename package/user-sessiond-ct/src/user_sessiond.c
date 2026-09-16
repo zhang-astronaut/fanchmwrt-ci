@@ -154,6 +154,23 @@ static struct client_hist hists[MAX_CLIENTS];
 static struct ubus_context *ctx;
 static struct blob_buf bb;
 static int sample_sec = 5;
+static int snap_ttl_sec = 2;
+static time_t snap_ts;
+static int snap_valid;
+
+static int parse_arp(void);
+static void scan_conntrack(const char *filter_mac, struct session_row *rows, int max_rows, int *out_rows);
+
+static void refresh_snapshot(void)
+{
+	time_t now = time(NULL);
+	if (snap_valid && (now - snap_ts) < snap_ttl_sec)
+		return;
+	parse_arp();
+	scan_conntrack(NULL, NULL, 0, NULL);
+	snap_ts = now;
+	snap_valid = 1;
+}
 
 static void mac_norm(const char *in, char *out, size_t n)
 {
@@ -495,8 +512,7 @@ static int handle_common(struct ubus_context *c, struct ubus_object *obj,
 	void *droot = blobmsg_open_table(&bb, "data");
 
 	if (strcmp(api, "get_session_user_list") == 0) {
-		parse_arp();
-		scan_conntrack(NULL, NULL, 0, NULL);
+		refresh_snapshot();
 		int total = 0;
 		void *arr = blobmsg_open_array(&bb, "list");
 		for (int i = 0; i < n_clients; i++) {
@@ -533,8 +549,7 @@ static int handle_common(struct ubus_context *c, struct ubus_object *obj,
 		if (range != 1 && range != 2 && range != 3)
 			range = 2;
 		int step_sec = (range == 1) ? 5 : 60;
-		parse_arp();
-		scan_conntrack(NULL, NULL, 0, NULL);
+		refresh_snapshot();
 		struct client_stat *c = find_by_mac(mac);
 		struct client_hist *h = NULL;
 		for (int i = 0; i < MAX_CLIENTS; i++)
@@ -579,7 +594,7 @@ static int handle_common(struct ubus_context *c, struct ubus_object *obj,
 			page_size = 20;
 		if (page_size > 200)
 			page_size = 200;
-		parse_arp();
+		refresh_snapshot();
 		static struct session_row rows[MAX_SESSIONS];
 		int nrows = 0;
 		scan_conntrack(mac, rows, MAX_SESSIONS, &nrows);
