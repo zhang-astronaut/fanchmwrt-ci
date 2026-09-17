@@ -16,13 +16,11 @@ local function read_arp_ip_mac()
   if not f then return by_mac, by_ip end
   f:read("*l")
   for line in f:lines() do
-    local ip, _hw, fl, mac = line:match("(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+    local ip, _hw, _fl, mac = line:match("(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
     if ip and mac and mac ~= "00:00:00:00:00:00" then
-      if tonumber(fl, 16) and (tonumber(fl, 16) % 2 == 1) then
-        mac = mac_norm(mac)
-        by_mac[mac] = ip
-        by_ip[ip] = mac
-      end
+      mac = mac_norm(mac)
+      by_mac[mac] = ip
+      by_ip[ip] = mac
     end
   end
   f:close()

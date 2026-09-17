@@ -209,7 +209,7 @@ local function read_dhcp_names()
     if not f then return by_mac end
     for line in f:lines() do
         -- exp mac ip hostname clientid
-        local mac, ip, host = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+        local exp, mac, ip, host = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
         if mac and ip and host and host ~= "*" then
             by_mac[mac:lower()] = { hostname = host, ip = ip }
         end
