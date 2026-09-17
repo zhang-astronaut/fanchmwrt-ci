@@ -1,14 +1,20 @@
 ---
 feature: session-bg-hostname
-status: designed
+status: delivered
 updated: 2026-09-17
 branch: feat/session-bg-hostname
-commits:
+commits: dfc59b3..2de777b
 ---
 
 # Session Stats: Background Sampling + Friendly User Labels
 
 ## Report
+
+**What was built** — 后台采样守护（Lua+procd，每 5s）在不打开 LuCI 时持续写 hist；用户列表增加 dhcp.leases 主机名与 IP（LuCI 已支持 hostname 显示）。保留 per-MAC、时间窗、分桶、MAC 解析等已修逻辑。
+
+**Verification** — 路由器上 sampler 进程在跑；hist 体积增长且含连续 5s 时间戳；dhcp.leases 有 LAPTOP/iPad/DESKTOP 等主机名。
+
+**Journey log** — 页面打开才采样会导致曲线从零开始；UI 已能显示 hostname，只需后端填充；不改 value=mac 契约。
 
 ## [S1] Problem
 

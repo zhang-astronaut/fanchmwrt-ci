@@ -338,38 +338,31 @@ local function snapshot()
     return list, rows, total
 end
 
+-- LuCI must NOT write hist: CGI memory is often stale/nearly empty and
+-- used to overwrite the sampler file → chart collapsed to 1 point.
+local function reload_hist_from_file()
+    hist.t = {}
+    hist.macs = {}
+    local f = io.open(HIST_FILE, "r")
+    if not f then return end
+    for line in f:lines() do
+        if line:sub(1, 2) == "t=" then
+            append_hist_points(hist.t, line:sub(3))
+        elseif line:sub(1, 2) == "m=" then
+            local mac, rest = line:sub(3):match("^([^;]+)(.*)$")
+            if mac then
+                local arr = hist.macs[mac]
+                if not arr then arr = {}; hist.macs[mac] = arr end
+                append_hist_points(arr, rest)
+            end
+        end
+    end
+    f:close()
+end
+
 local function sample_history(total, list)
-    local t = os.time()
-    if t - last_sample < 5 then return end
-    last_sample = t
-    local tt, tu, to = 0, 0, 0
-    for _, u in ipairs(list) do
-        tt = tt + u.tcp_count
-        tu = tu + u.udp_count
-        to = to + u.other_count
-        local h = hist.macs[u.mac]
-        if not h then h = {}; hist.macs[u.mac] = h end
-        h[#h+1] = {
-            ts = t, total = u.session_count,
-            tcp = u.tcp_count, udp = u.udp_count, other = u.other_count,
-        }
-        if #h > HIST_MAX then table.remove(h, 1) end
-    end
-    hist.t[#hist.t+1] = { ts = t, total = total, tcp = tt, udp = tu, other = to }
-    if #hist.t > HIST_MAX then table.remove(hist.t, 1) end
-    -- Throttle across CGI forks via sidecar timestamp
-    local last_ts = last_save
-    local sf = io.open(HIST_SAVE_TS, "r")
-    if sf then
-        last_ts = math.max(last_ts, tonumber(sf:read("*l") or "0") or 0)
-        sf:close()
-    end
-    if t - last_ts >= 5 then
-        last_save = t
-        save_hist()
-        local sf2 = io.open(HIST_SAVE_TS, "w")
-        if sf2 then sf2:write(tostring(t)) sf2:close() end
-    end
+    -- no-op for disk: sampler owns the file. Keep signature for callers.
+    return
 end
 
 -- Bucket-average samples inside the time window by step_sec.
@@ -497,25 +490,11 @@ function get_session_history()
     if range ~= 1 and range ~= 2 and range ~= 3 then range = 2 end
     luci.http.prepare_content("application/json")
 
-    -- Prefer user-sessiond-ct: samples every 5s in a long-lived process.
-    -- CGI-per-request Lua only adds ~1 point/visit → chart looks like a single dot.
-    local util = require "luci.util"
-    local resp = util.ubus("user_session", "common", {
-        api = "get_session_history",
-        data = { mac = mac, range = range },
-    })
-    if resp and resp.code == 2000 and resp.data and type(resp.data.list) == "table"
-        and #resp.data.list > 0 then
-        local d = resp.data
-        d.tcp_list = d.tcp_list or {}
-        d.udp_list = d.udp_list or {}
-        d.other_list = d.other_list or {}
-        luci.http.write_json(d)
-        return
-    end
+    -- Always read sampler-owned hist file (fresh).
+    reload_hist_from_file()
 
-    local list, total = snapshot_list()
-    sample_history(total, list)
+    local list = snapshot_list()
+    list = annotate_users(list)
     local step = (range == 1) and 5 or 60
     local cur_user = nil
     local online = 0
@@ -527,8 +506,9 @@ function get_session_history()
         end
     end
     local ser, cur, avg, peak = series_for(mac, range, step, cur_user)
+    local hostname = cur_user and cur_user.hostname or ""
     luci.http.write_json({
-        mac = mac, hostname = "", online = online,
+        mac = mac, hostname = hostname, online = online,
         range = range, step_sec = step,
         current = cur, avg = avg, peak = peak,
         list = ser.list,
