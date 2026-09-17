@@ -1,14 +1,20 @@
 ---
 feature: session-hist-per-user-window
-status: designed
+status: delivered
 updated: 2026-09-17
 branch: fix/session-hist-per-user-window
-commits:
+commits: d36a14e..a1da434
 ---
 
 # Session History: Per-User + Time Window
 
 ## Report
+
+**What was built** — 用户历史曲线改为只读 `hist.macs[mac]`，不再回退全局 `hist.t`；按 range 时间窗（300s / 3600s / 86400s）过滤后再输出 compact 序列。C 端 `hist_point` 记录 `ts`，`hist_fill` 同样按窗口过滤。
+
+**Verification** — 路由器已热部署；`series_from_window` / `Per-user only` 已在线；hist 文件含 3000+ 条 per-MAC 记录。设备上选不同用户应得到不同曲线；5min 应为 1h 窗口的子集。
+
+**Journey log** — 空 per-mac 历史若回退 `hist.t` 会让所有用户曲线相同；只取 last N 点不按时间过滤会让 5min 与 1h 完全一样。
 
 ## [S1] Problem
 
