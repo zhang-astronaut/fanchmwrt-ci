@@ -335,28 +335,46 @@ local function sample_history(total, list)
     end
 end
 
--- Compact series from samples already inside the time window.
-local function series_from_window(src, window_sec, points)
+-- Bucket-average samples inside the time window by step_sec.
+-- Without bucketing, 5min and 1h return the same compact list when
+-- total history is shorter than 1 hour.
+local function series_from_window(src, window_sec, points, step_sec)
     local now = os.time()
-    local out = { list = {}, tcp_list = {}, udp_list = {}, other_list = {} }
-    local filtered = {}
+    step_sec = step_sec or 60
+    local buckets = {} -- key = absolute bucket id
+    local order = {}
     for _, p in ipairs(src) do
         local age = now - (p.ts or 0)
         if age >= 0 and age <= window_sec then
-            filtered[#filtered+1] = p
+            local bid = math.floor((p.ts or 0) / step_sec)
+            local b = buckets[bid]
+            if not b then
+                b = { n = 0, total = 0, tcp = 0, udp = 0, other = 0, bid = bid }
+                buckets[bid] = b
+                order[#order+1] = bid
+            end
+            b.n = b.n + 1
+            b.total = b.total + (p.total or 0)
+            b.tcp = b.tcp + (p.tcp or 0)
+            b.udp = b.udp + (p.udp or 0)
+            b.other = b.other + (p.other or 0)
         end
     end
-    local n = #filtered
-    local start = math.max(1, n - points + 1)
+    table.sort(order)
+    local out = { list = {}, tcp_list = {}, udp_list = {}, other_list = {} }
     local sum, peak, cur = 0, 0, 0
     local cnt = 0
-    for i = start, n do
-        local p = filtered[i]
-        local v = p.total or 0
+    local start = math.max(1, #order - points + 1)
+    for i = start, #order do
+        local b = buckets[order[i]]
+        local v = math.floor(b.total / b.n)
+        local tv = math.floor(b.tcp / b.n)
+        local uv = math.floor(b.udp / b.n)
+        local ov = math.floor(b.other / b.n)
         out.list[#out.list+1] = v
-        out.tcp_list[#out.tcp_list+1] = p.tcp or 0
-        out.udp_list[#out.udp_list+1] = p.udp or 0
-        out.other_list[#out.other_list+1] = p.other or 0
+        out.tcp_list[#out.tcp_list+1] = tv
+        out.udp_list[#out.udp_list+1] = uv
+        out.other_list[#out.other_list+1] = ov
         sum = sum + v
         if v > peak then peak = v end
         cur = v
@@ -369,23 +387,21 @@ local function series_from_window(src, window_sec, points)
 end
 
 local function series_for(mac, range, step, cur_user)
-    local window_sec, points
+    local window_sec, points, step_sec
     if range == 1 then
-        window_sec, points = 300, 60
+        window_sec, points, step_sec = 300, 60, 5
     elseif range == 3 then
-        window_sec, points = 86400, 1440
+        window_sec, points, step_sec = 86400, 1440, 60
     else
-        window_sec, points = 3600, 60
+        window_sec, points, step_sec = 3600, 60, 60
     end
 
-    -- Per-user only. Falling back to hist.t made every user share the
-    -- global series (same curve for all MACs).
     local src = {}
     if mac and hist.macs[mac] then
         src = hist.macs[mac]
     end
 
-    local out, cur, avg, peak = series_from_window(src, window_sec, points)
+    local out, cur, avg, peak = series_from_window(src, window_sec, points, step_sec)
     if cur_user then
         if #out.list <= 1 and (out.list[1] or 0) == 0 then
             local c = cur_user.session_count or 0
