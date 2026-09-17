@@ -25,7 +25,12 @@ local function split_ws(s)
 end
 
 local function save_hist()
-    local f = io.open(HIST_FILE, "w")
+    -- Atomic + serialized: concurrent CGI forks used to interleave writes
+    -- and leave one sample per m= line; restore then kept only the last line.
+    local lock = io.open(HIST_FILE .. ".lock", "w")
+    if lock then lock:write(tostring(os.time())) lock:close() end
+    local tmp = HIST_FILE .. ".tmp"
+    local f = io.open(tmp, "w")
     if not f then return end
     f:write("t=")
     for i, p in ipairs(hist.t) do
@@ -41,6 +46,28 @@ local function save_hist()
         f:write("\n")
     end
     f:close()
+    os.remove(HIST_FILE)
+    os.rename(tmp, HIST_FILE)
+end
+
+local function append_hist_points(dst, parts)
+    local seen = {}
+    for _, p in ipairs(dst) do seen[p.ts] = true end
+    for part in parts:gmatch("[^;]+") do
+        local ts, tot, tcp, udp, oth = part:match("^(%d+),(%d+),?(%d*),?(%d*),?(%d*)$")
+        if ts then
+            ts = tonumber(ts)
+            if not seen[ts] then
+                seen[ts] = true
+                dst[#dst+1] = {
+                    ts = ts, total = tonumber(tot) or 0,
+                    tcp = tonumber(tcp) or 0, udp = tonumber(udp) or 0, other = tonumber(oth) or 0,
+                }
+            end
+        end
+    end
+    table.sort(dst, function(a, b) return a.ts < b.ts end)
+    while #dst > HIST_MAX do table.remove(dst, 1) end
 end
 
 local function restore_hist()
@@ -48,30 +75,15 @@ local function restore_hist()
     if not f then return end
     for line in f:lines() do
         if line:sub(1, 2) == "t=" then
-            hist.t = {}
-            for part in line:sub(3):gmatch("[^;]+") do
-                local ts, tot, tcp, udp, oth = part:match("^(%d+),(%d+),?(%d*),?(%d*),?(%d*)$")
-                if ts then
-                    hist.t[#hist.t+1] = {
-                        ts = tonumber(ts), total = tonumber(tot) or 0,
-                        tcp = tonumber(tcp) or 0, udp = tonumber(udp) or 0, other = tonumber(oth) or 0,
-                    }
-                end
-            end
+            if #hist.t == 0 then hist.t = {} end
+            append_hist_points(hist.t, line:sub(3))
         elseif line:sub(1, 2) == "m=" then
-            local mac, rest = line:sub(3):match("^(%S+)(.*)$")
+            -- MAC is everything before the first ';' — NOT %S+ (greedy, ate samples)
+            local mac, rest = line:sub(3):match("^([^;]+)(.*)$")
             if mac then
-                local arr = {}
-                for part in rest:gmatch(";([^;]+)") do
-                    local ts, tot, tcp, udp, oth = part:match("^(%d+),(%d+),(%d+),(%d+),(%d+)$")
-                    if ts then
-                        arr[#arr+1] = {
-                            ts = tonumber(ts), total = tonumber(tot) or 0,
-                            tcp = tonumber(tcp) or 0, udp = tonumber(udp) or 0, other = tonumber(oth) or 0,
-                        }
-                    end
-                end
-                hist.macs[mac] = arr
+                local arr = hist.macs[mac]
+                if not arr then arr = {}; hist.macs[mac] = arr end
+                append_hist_points(arr, rest)
             end
         end
     end
