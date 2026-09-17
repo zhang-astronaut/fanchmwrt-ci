@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=user-sessiond-ct
-PKG_VERSION:=1.2.0
+PKG_VERSION:=1.3.0
 PKG_RELEASE:=1
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
@@ -14,13 +14,14 @@ define Package/user-sessiond-ct
   SECTION:=net
   CATEGORY:=Network
   TITLE:=User session stats via conntrack+app (TPROXY-safe)
-  DEPENDS:=+libubox +libubus
+  URL:=https://github.com/zhang-astronaut/fanchmwrt-ci
+  DEPENDS:=+libubox +libubus +lua
 endef
 
 define Package/user-sessiond-ct/description
   Replacement for FanchmWrt UserSession user_sessiond.
-  Aggregates per-MAC sessions from nf_conntrack+ARP and joins
-  /proc/net/af_active_app for app name/URL. Works under UA3F TPROXY.
+  Per-MAC sessions from nf_conntrack+ARP; background Lua sampler keeps
+  history warm without LuCI open; user list labels use dhcp.leases names.
 endef
 
 define Build/Prepare
@@ -40,9 +41,10 @@ endef
 define Package/user-sessiond-ct/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/user_sessiond $(1)/usr/bin/user-sessiond-ct
+	$(INSTALL_DATA) ./files/user-session-sampler.lua $(1)/usr/bin/user-session-sampler.lua
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/user-sessiond-ct.init $(1)/etc/init.d/user-sessiond-ct
-	# LuCI controller (conntrack session stats; overrides stock UserSession page backend)
+	$(INSTALL_BIN) ./files/user-session-sampler.init $(1)/etc/init.d/user-session-sampler
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DATA) ./files/fwx_user_session.lua $(1)/usr/lib/lua/luci/controller/fwx_user_session.lua
 endef

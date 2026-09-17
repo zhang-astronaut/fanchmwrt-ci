@@ -203,6 +203,42 @@ local SNAP_FILE = "/tmp/us_snap.tsv"
 local last_save = 0
 local snap_cache = { ts = 0 }
 
+local function read_dhcp_names()
+    local by_mac = {}
+    local f = io.open("/tmp/dhcp.leases", "r")
+    if not f then return by_mac end
+    for line in f:lines() do
+        -- exp mac ip hostname clientid
+        local mac, ip, host = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+        if mac and ip and host and host ~= "*" then
+            by_mac[mac:lower()] = { hostname = host, ip = ip }
+        end
+    end
+    f:close()
+    return by_mac
+end
+
+local function annotate_users(list)
+    local names = read_dhcp_names()
+    local arp = read_arp() -- ip -> mac
+    local mac_ip = {}
+    for ip, mac in pairs(arp) do
+        mac_ip[mac] = ip
+    end
+    for _, u in ipairs(list) do
+        local n = names[u.mac]
+        u.ip = mac_ip[u.mac] or (n and n.ip) or ""
+        u.hostname = (n and n.hostname) or ""
+        u.nickname = u.nickname or ""
+        if u.nickname ~= "" then
+            -- keep nickname for UI
+        elseif u.hostname ~= "" then
+            -- hostname used by LuCI parseUserDisplayName
+        end
+    end
+    return list
+end
+
 local function snapshot_now()
     local arp = read_arp()
     local apps = read_apps()
@@ -210,12 +246,12 @@ local function snapshot_now()
     local list = {}
     local seen = {}
     local total_sessions = 0
-    for _ip, mac in pairs(arp) do
+    for ip, mac in pairs(arp) do
         if not seen[mac] then
             seen[mac] = true
             local s = stats[mac] or { session_count=0, tcp_count=0, udp_count=0, other_count=0 }
             list[#list+1] = {
-                mac = mac, hostname = "", nickname = "",
+                mac = mac, hostname = "", nickname = "", ip = ip,
                 online = 1,
                 session_count = s.session_count,
                 tcp_count = s.tcp_count,
@@ -226,6 +262,7 @@ local function snapshot_now()
         end
     end
     table.sort(list, function(a,b) return a.mac < b.mac end)
+    annotate_users(list)
     return list, rows, total_sessions
 end
 
@@ -416,6 +453,7 @@ end
 function get_session_user_list()
     luci.http.prepare_content("application/json")
     local list, total = snapshot_list()
+    annotate_users(list)
     sample_history(total, list)
     luci.http.write_json({ total_num = #list, list = list })
 end

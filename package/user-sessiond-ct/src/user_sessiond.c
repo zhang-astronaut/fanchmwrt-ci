@@ -23,6 +23,15 @@
 #define MAX_SESSIONS 4096
 #define HIST_LEN 1440
 #define ARP_MAX 256
+#define MAX_DHCP MAX_CLIENTS
+
+struct dhcp_name {
+	char mac[32];
+	char ip[64];
+	char host[64];
+};
+static struct dhcp_name dhcp_names[MAX_DHCP];
+static int n_dhcp;
 
 struct client_stat {
 	char mac[32];
@@ -515,6 +524,36 @@ static const struct blobmsg_policy listen_policy[__L_MAX] = {
 	[L_DATA] = { .name = "data", .type = BLOBMSG_TYPE_TABLE },
 };
 
+static void load_dhcp_names(void)
+{
+	FILE *f = fopen("/tmp/dhcp.leases", "r");
+	char line[256];
+	n_dhcp = 0;
+	if (!f)
+		return;
+	while (fgets(line, sizeof(line), f) && n_dhcp < MAX_CLIENTS) {
+		char mac[32], ip[64], host[64];
+		unsigned long exp = 0;
+		if (sscanf(line, "%lu %31s %63s %63s", &exp, mac, ip, host) < 4)
+			continue;
+		if (strcmp(host, "*") == 0)
+			continue;
+		struct dhcp_name *d = &dhcp_names[n_dhcp++];
+		mac_norm(mac, d->mac, sizeof(d->mac));
+		snprintf(d->ip, sizeof(d->ip), "%s", ip);
+		snprintf(d->host, sizeof(d->host), "%s", host);
+	}
+	fclose(f);
+}
+
+static const char *dhcp_host_for(const char *mac)
+{
+	for (int i = 0; i < n_dhcp; i++)
+		if (strcmp(dhcp_names[i].mac, mac) == 0)
+			return dhcp_names[i].host;
+	return "";
+}
+
 static int handle_common(struct ubus_context *c, struct ubus_object *obj,
 			 struct ubus_request_data *req, const char *method,
 			 struct blob_attr *msg)
@@ -532,13 +571,16 @@ static int handle_common(struct ubus_context *c, struct ubus_object *obj,
 
 	if (strcmp(api, "get_session_user_list") == 0) {
 		refresh_snapshot();
+		load_dhcp_names();
 		int total = 0;
 		void *arr = blobmsg_open_array(&bb, "list");
 		for (int i = 0; i < n_clients; i++) {
 			void *t = blobmsg_open_table(&bb, NULL);
+			const char *hn = dhcp_host_for(clients[i].mac);
 			blobmsg_add_string(&bb, "mac", clients[i].mac);
-			blobmsg_add_string(&bb, "hostname", "");
+			blobmsg_add_string(&bb, "hostname", hn);
 			blobmsg_add_string(&bb, "nickname", "");
+			blobmsg_add_string(&bb, "ip", clients[i].ip);
 			blobmsg_add_u32(&bb, "online", clients[i].online);
 			blobmsg_add_u32(&bb, "session_count", clients[i].session_count);
 			blobmsg_add_u32(&bb, "tcp_count", clients[i].tcp_count);
