@@ -138,6 +138,7 @@ static struct app_entry *find_app(const char *mac, const char *sip, int sport,
 
 struct hist_point {
 	int total, tcp, udp, other;
+	time_t ts;
 };
 
 struct client_hist {
@@ -381,6 +382,7 @@ static void sample_history(void)
 		pt->tcp = clients[i].tcp_count;
 		pt->udp = clients[i].udp_count;
 		pt->other = clients[i].other_count;
+		pt->ts = time(NULL);
 		h->head = (h->head + 1) % HIST_LEN;
 		if (h->count < HIST_LEN)
 			h->count++;
@@ -395,86 +397,103 @@ static void sample_cb(struct uloop_timeout *t)
 	uloop_timeout_set(t, sample_sec * 1000);
 }
 
-static void hist_fill(struct blob_buf *b, const char *name, struct client_hist *h,
-		      int range, int step_sec, const char *field)
+static int hist_window_sec(int range)
 {
-	/* range: 1=5min, 2=hourish, 3=day — map to how many samples */
+	if (range == 1)
+		return 300;
+	if (range == 3)
+		return 86400;
+	return 3600;
+}
+
+static int hist_want_points(int range, int step_sec)
+{
 	int want;
 	if (range == 1)
 		want = (5 * 60) / step_sec;
 	else if (range == 3)
 		want = (24 * 3600) / step_sec;
 	else
-		want = (2 * 3600) / step_sec;
+		want = (60 * 60) / step_sec;
 	if (want > HIST_LEN)
 		want = HIST_LEN;
 	if (want < 1)
 		want = 1;
-	/* cap for UI similar to original ~10-60 points */
 	if (want > 60 && range != 3)
 		want = 60;
-	if (want > 120)
-		want = 120;
+	if (want > 1440)
+		want = 1440;
+	return want;
+}
 
-	void *arr = blobmsg_open_array(b, name);
-	int got = 0;
-	int sum = 0, peak = 0, last = 0;
-	/* walk from oldest among last `want` samples */
-	int n = h ? h->count : 0;
-	if (n > want)
+/* Collect last `want` points that fall inside the range window. */
+static int hist_collect(struct client_hist *h, int range, struct hist_point *out, int maxn)
+{
+	if (!h || h->count <= 0)
+		return 0;
+	int win = hist_window_sec(range);
+	time_t now = time(NULL);
+	int n = 0;
+	for (int i = 0; i < h->count && n < maxn; i++) {
+		int idx = (h->head - 1 - i + HIST_LEN * 2) % HIST_LEN;
+		struct hist_point *pt = &h->ring[idx];
+		if (pt->ts && (now - pt->ts) > win)
+			break; /* ring is append-only; older than window → stop */
+		out[n++] = *pt;
+	}
+	/* reverse to oldest→newest */
+	for (int i = 0; i < n / 2; i++) {
+		struct hist_point tmp = out[i];
+		out[i] = out[n - 1 - i];
+		out[n - 1 - i] = tmp;
+	}
+	return n;
+}
+
+static void hist_fill(struct blob_buf *b, const char *name, struct client_hist *h,
+		      int range, int step_sec, const char *field)
+{
+	int want = hist_want_points(range, step_sec);
+	struct hist_point tmp[HIST_LEN];
+	int n = hist_collect(h, range, tmp, HIST_LEN);
+	if (n > want) {
+		memmove(tmp, tmp + (n - want), want * sizeof(tmp[0]));
 		n = want;
-	int start = h ? ((h->head - n + HIST_LEN * 2) % HIST_LEN) : 0;
+	}
+	void *arr = blobmsg_open_array(b, name);
 	for (int i = 0; i < n; i++) {
-		struct hist_point *pt = &h->ring[(start + i) % HIST_LEN];
-		int v = 0;
+		int v;
 		if (strcmp(field, "tcp") == 0)
-			v = pt->tcp;
+			v = tmp[i].tcp;
 		else if (strcmp(field, "udp") == 0)
-			v = pt->udp;
+			v = tmp[i].udp;
 		else if (strcmp(field, "other") == 0)
-			v = pt->other;
+			v = tmp[i].other;
 		else
-			v = pt->total;
+			v = tmp[i].total;
 		blobmsg_add_u32(b, NULL, v);
-		sum += v;
-		if (v > peak)
-			peak = v;
-		last = v;
-		got++;
 	}
 	blobmsg_close_array(b, arr);
-	(void)sum;
-	(void)peak;
-	(void)last;
-	(void)got;
 }
 
 static int hist_avg_peak(struct client_hist *h, int range, int step_sec,
 			 int *avg, int *peak, int *cur)
 {
-	int want;
-	if (range == 1)
-		want = (5 * 60) / step_sec;
-	else if (range == 3)
-		want = (24 * 3600) / step_sec;
-	else
-		want = (2 * 3600) / step_sec;
-	if (want > 60 && range != 3)
-		want = 60;
-	if (want > 120)
-		want = 120;
-	int n = h ? h->count : 0;
-	if (n > want)
+	int want = hist_want_points(range, step_sec);
+	struct hist_point tmp[HIST_LEN];
+	int n = hist_collect(h, range, tmp, HIST_LEN);
+	if (n > want) {
+		memmove(tmp, tmp + (n - want), want * sizeof(tmp[0]));
 		n = want;
+	}
 	*avg = 0;
 	*peak = 0;
 	*cur = 0;
-	if (!h || n <= 0)
+	if (n <= 0)
 		return 0;
-	int start = (h->head - n + HIST_LEN * 2) % HIST_LEN;
 	int sum = 0;
 	for (int i = 0; i < n; i++) {
-		int v = h->ring[(start + i) % HIST_LEN].total;
+		int v = tmp[i].total;
 		sum += v;
 		if (v > *peak)
 			*peak = v;

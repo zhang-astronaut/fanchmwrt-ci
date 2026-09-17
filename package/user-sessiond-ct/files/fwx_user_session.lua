@@ -323,16 +323,23 @@ local function sample_history(total, list)
     end
 end
 
--- Return up to `points` actual samples (oldest→newest). Do NOT zero-fill
--- 5s buckets between 30s persists — that made the chart look like 1 dot.
-local function resample(src, points, step_sec)
+-- Compact series from samples already inside the time window.
+local function series_from_window(src, window_sec, points)
+    local now = os.time()
     local out = { list = {}, tcp_list = {}, udp_list = {}, other_list = {} }
-    local n = #src
+    local filtered = {}
+    for _, p in ipairs(src) do
+        local age = now - (p.ts or 0)
+        if age >= 0 and age <= window_sec then
+            filtered[#filtered+1] = p
+        end
+    end
+    local n = #filtered
     local start = math.max(1, n - points + 1)
     local sum, peak, cur = 0, 0, 0
     local cnt = 0
     for i = start, n do
-        local p = src[i]
+        local p = filtered[i]
         local v = p.total or 0
         out.list[#out.list+1] = v
         out.tcp_list[#out.tcp_list+1] = p.tcp or 0
@@ -350,22 +357,30 @@ local function resample(src, points, step_sec)
 end
 
 local function series_for(mac, range, step, cur_user)
-    local points
-    if range == 1 then points = 60
-    elseif range == 3 then points = 1440
-    else points = 60 end
-
-    local src
-    if mac and hist.macs[mac] and #hist.macs[mac] > 0 then
-        src = hist.macs[mac]
+    local window_sec, points
+    if range == 1 then
+        window_sec, points = 300, 60
+    elseif range == 3 then
+        window_sec, points = 86400, 1440
     else
-        src = hist.t
+        window_sec, points = 3600, 60
     end
-    local out, cur, avg, peak = resample(src, points, step)
-    if cur_user and cur == 0 then
-        cur = cur_user.session_count or 0
-        avg = cur
-        peak = cur
+
+    -- Per-user only. Falling back to hist.t made every user share the
+    -- global series (same curve for all MACs).
+    local src = {}
+    if mac and hist.macs[mac] then
+        src = hist.macs[mac]
+    end
+
+    local out, cur, avg, peak = series_from_window(src, window_sec, points)
+    if cur_user then
+        if #out.list <= 1 and (out.list[1] or 0) == 0 then
+            local c = cur_user.session_count or 0
+            out = { list = {c}, tcp_list = {cur_user.tcp_count or 0},
+                    udp_list = {cur_user.udp_count or 0}, other_list = {cur_user.other_count or 0} }
+            cur, avg, peak = c, c, c
+        end
     end
     return out, cur, avg, peak
 end
