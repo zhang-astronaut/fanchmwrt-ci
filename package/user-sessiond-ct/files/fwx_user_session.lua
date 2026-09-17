@@ -315,7 +315,7 @@ local function sample_history(total, list)
         last_ts = math.max(last_ts, tonumber(sf:read("*l") or "0") or 0)
         sf:close()
     end
-    if t - last_ts >= 30 then
+    if t - last_ts >= 5 then
         last_save = t
         save_hist()
         local sf2 = io.open(HIST_SAVE_TS, "w")
@@ -323,66 +323,37 @@ local function sample_history(total, list)
     end
 end
 
--- Resample into fixed time buckets matching LuCI getWindowPointCount/step.
--- range 1: 60 x 5s = 5min; range 2: 60 x 60s = 1h; range 3: 1440 x 60s = 24h
+-- Return up to `points` actual samples (oldest→newest). Do NOT zero-fill
+-- 5s buckets between 30s persists — that made the chart look like 1 dot.
 local function resample(src, points, step_sec)
-    local now = os.time()
     local out = { list = {}, tcp_list = {}, udp_list = {}, other_list = {} }
-    local acc = {}
-    for i = 1, points do
-        acc[i] = { n = 0, total = 0, tcp = 0, udp = 0, other = 0 }
-    end
-    for _, p in ipairs(src) do
-        local age = now - (p.ts or 0)
-        if age >= 0 and age < points * step_sec then
-            local from_end = math.floor(age / step_sec) -- 0 = newest bucket
-            local idx = points - from_end
-            if idx >= 1 and idx <= points then
-                local b = acc[idx]
-                b.n = b.n + 1
-                b.total = b.total + (p.total or 0)
-                b.tcp = b.tcp + (p.tcp or 0)
-                b.udp = b.udp + (p.udp or 0)
-                b.other = b.other + (p.other or 0)
-            end
-        end
-    end
+    local n = #src
+    local start = math.max(1, n - points + 1)
     local sum, peak, cur = 0, 0, 0
     local cnt = 0
-    for i = 1, points do
-        local b = acc[i]
-        local v, tv, uv, ov
-        if b.n > 0 then
-            v = math.floor(b.total / b.n)
-            tv = math.floor(b.tcp / b.n)
-            uv = math.floor(b.udp / b.n)
-            ov = math.floor(b.other / b.n)
-        else
-            v, tv, uv, ov = 0, 0, 0, 0
-        end
-        out.list[i] = v
-        out.tcp_list[i] = tv
-        out.udp_list[i] = uv
-        out.other_list[i] = ov
-        if b.n > 0 then
-            sum = sum + v
-            if v > peak then peak = v end
-            cur = v
-            cnt = cnt + 1
-        end
+    for i = start, n do
+        local p = src[i]
+        local v = p.total or 0
+        out.list[#out.list+1] = v
+        out.tcp_list[#out.tcp_list+1] = p.tcp or 0
+        out.udp_list[#out.udp_list+1] = p.udp or 0
+        out.other_list[#out.other_list+1] = p.other or 0
+        sum = sum + v
+        if v > peak then peak = v end
+        cur = v
+        cnt = cnt + 1
+    end
+    if cnt == 0 then
+        out.list = {0}; out.tcp_list={0}; out.udp_list={0}; out.other_list={0}
     end
     return out, cur, (cnt > 0 and math.floor(sum / cnt) or 0), peak
 end
 
 local function series_for(mac, range, step, cur_user)
-    local points, step_sec
-    if range == 1 then
-        points, step_sec = 60, 5
-    elseif range == 3 then
-        points, step_sec = 1440, 60
-    else
-        points, step_sec = 60, 60
-    end
+    local points
+    if range == 1 then points = 60
+    elseif range == 3 then points = 1440
+    else points = 60 end
 
     local src
     if mac and hist.macs[mac] and #hist.macs[mac] > 0 then
@@ -390,7 +361,7 @@ local function series_for(mac, range, step, cur_user)
     else
         src = hist.t
     end
-    local out, cur, avg, peak = resample(src, points, step_sec)
+    local out, cur, avg, peak = resample(src, points, step)
     if cur_user and cur == 0 then
         cur = cur_user.session_count or 0
         avg = cur
@@ -444,6 +415,24 @@ function get_session_history()
     local range = tonumber(luci.http.formvalue("range") or "2") or 2
     if range ~= 1 and range ~= 2 and range ~= 3 then range = 2 end
     luci.http.prepare_content("application/json")
+
+    -- Prefer user-sessiond-ct: samples every 5s in a long-lived process.
+    -- CGI-per-request Lua only adds ~1 point/visit → chart looks like a single dot.
+    local util = require "luci.util"
+    local resp = util.ubus("user_session", "common", {
+        api = "get_session_history",
+        data = { mac = mac, range = range },
+    })
+    if resp and resp.code == 2000 and resp.data and type(resp.data.list) == "table"
+        and #resp.data.list > 0 then
+        local d = resp.data
+        d.tcp_list = d.tcp_list or {}
+        d.udp_list = d.udp_list or {}
+        d.other_list = d.other_list or {}
+        luci.http.write_json(d)
+        return
+    end
+
     local list, total = snapshot_list()
     sample_history(total, list)
     local step = (range == 1) and 5 or 60
