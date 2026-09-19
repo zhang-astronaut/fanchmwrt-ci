@@ -155,7 +155,10 @@ jobs:
                     user-sessiond-ct \
                     srunpy luci-app-srunpy python3-requests \
                     openssh-sftp-server dropbear \
-                    easytier luci-app-easytier"
+                    easytier luci-app-easytier \
+                    kmod-mt7921e kmod-mt7921-firmware \
+                    kmod-iwlwifi iwlwifi-firmware-ax200 iwlwifi-firmware-ax201 \
+                    kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae"
           for s in $REQUIRED; do
             sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
             grep -q "^CONFIG_PACKAGE_${s}=y$" .config || echo "CONFIG_PACKAGE_${s}=y" >> .config
@@ -238,6 +241,7 @@ jobs:
             - 内置 MT7922 USB 无线驱动（kmod-mt7921u + firmware + wpad）
             - 内置 SRunPy 校园网自动登录（srunpy + luci-app-srunpy + python3-requests）；Release 附带上游 apk/ipk
             - 内置 sftp-server（openssh-sftp-server + dropbear SFTP）与 EasyTier（easytier + luci-app-easytier）
+            - 内置常用无线驱动：kmod-mt7921e(PCIe)/mt7921u(USB) + iwlwifi/ath9k/rtw88/rtw89/brcmfmac 等
             - 配置见仓库 fanchmwrt.config（4G 分区 / Docker / UA3F 全套 kmod / 应用中心）
             - 编译时对 defconfig 静默丢包做了强制回填 + 断言校验（见 workflow）
             - ⚠️ UA3F 与 PassWall 共存注意：PassWall 的 TCP 代理方式请保持默认 redirect，
