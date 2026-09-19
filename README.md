@@ -4,64 +4,80 @@
 
 ## 定制内容
 
-- **UA3F（内置）**：直接内置 UA3F 主程序 + LuCI 管理界面（源码取自官方仓库 master），
-  并应用**开机竞态修复**——原版 init 脚本 procd respawn 默认只重试 5 次，
-  开机时 WAN 默认路由未就绪会导致 BPF TC 初始化失败连崩 6 次后被 procd 永久放弃
-  （校园网看到裸 UA 导致封禁的根因）。修复为无限重试，路由就绪后自动恢复。
-- **PassWall（内置）**：luci-app-passwall + 中文语言包 + xray-core / sing-box 双核心，
-  开箱即用（feed 取自 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall)，
-  注意是 PassWall 而非 PassWall2）。
-- **MT7922 USB 无线**：kmod-mt7921u + kmod-mt7922-firmware + wpad-basic-mbedtls
-  （识别 `0489:e0d8` MediaTek Wireless_Device）。
-- **用户会话统计（TPROXY 兼容）**：`user-sessiond-ct` 用 conntrack+ARP 聚合每 MAC 会话数，
-  顶替闭源 `user_sessiond`（其依赖的 `fwx_user.ko` 在 UA3F TPROXY 下会话表恒为空）。
-- **UA3F 全套依赖**：kmod-ipt-nfqueue、kmod-nfnetlink-queue、iptables-mod-nfqueue、
-  kmod-ipt-tproxy/ipopt/conntrack-extra（+对应 iptables-mod-*）、iptables-mod-extra、
-  ipset、kmod-ipt-ipset、kmod-nf-conntrack-netlink、kmod-nft-queue/nft-socket/nft-tproxy、
-  kmod-sched-bpf + kmod-sched-core（eBPF 卸载）、luci-compat
-- **fwx 流量统计修复补丁**（`fwx-tproxy-stat.patch`）：修复 TPROXY 类代理
-  （UA3F/Passwall 等）下 dashboard 用户流量统计严重偏低的问题——
-  原版统计 hook 挂在 FORWARD 链，TPROXY 流量绕过 FORWARD 导致漏计；
-  补丁将上行/下行统计点挪到 PRE_ROUTING/POST_ROUTING 并修正出接口匹配。
-- **Docker 支持**：docker、dockerd、docker-compose、luci-app-dockerman（含中文）
-- **FanchmWrt 原生应用中心**：luci-app-fwx-app-center（含中文）
-- **rootfs 4G**（首次开机自动扩容到整盘）
+### 代理 / 校园网
 
-## UA3F 与 PassWall 共存说明（重要）
+- **UA3F（内置）**：主程序 + LuCI；含**开机竞态修复**——原版 procd respawn 只重试 5 次，
+  WAN 默认路由未就绪时 BPF TC 失败后被永久放弃（校园网裸 UA 封禁根因）。
+  已改为 `respawn 3600 5 0`（无限重试），路由就绪后自动恢复。
+- **PassWall（内置，非 PassWall2）**：`luci-app-passwall` + 中文包 + xray-core / sing-box 双核心
+  （feed：[Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall)）。
+- **SRunPy 校园网自动登录**：`srunpy` + `luci-app-srunpy` + `python3-requests`
+  （[HofNature/SRunPy-OpenWRT](https://github.com/HofNature/SRunPy-OpenWRT)）；
+  Release 会附带上游 apk/ipk，便于其它机器侧载。
+- **EasyTier**：`easytier` + `luci-app-easytier`（feed：[EasyTier/luci-app-easytier](https://github.com/EasyTier/luci-app-easytier)）。
 
-两者可以同时运行，数据流为：`LAN 客户端 → UA3F(TPROXY 改写 UA) → PassWall(加密出口)`。
-已验证的共存要点：
+### 无线驱动
 
-1. **PassWall 的 TCP 代理方式保持默认 `redirect`**，不要改成 `tproxy`——
-   会与 UA3F 的 TPROXY 在 mangle/PREROUTING 抢包。
-2. 端口无冲突（UA3F 监听 1080 / PassWall SOCKS 默认端口见 LuCI，勿与 1080 重叠）。
-3. 启动顺序无冲突（同为 S99，PassWall 自带启动延迟，UA3F 无限 respawn 兜底）。
-4. 本机代理开启时 PassWall 会接管 UA3F 的出站流量——这是预期行为
-   （改写完 UA 再走节点加密出口），但节点故障时会影响 UA3F 出站，排查时注意。
+- **MT7922 USB**：`kmod-mt7921u` + `kmod-mt7922-firmware` + `wpad-basic-mbedtls`
+- **MT7921 PCIe（客人机/VM）**：`kmod-mt7921e` + `kmod-mt7921-firmware`
+- **其它常用无线**：`kmod-iwlwifi`（ax200/ax201 等固件）、`kmod-ath9k` / `kmod-ath10k`、
+  `kmod-rtw88-8822ce`、`kmod-rtw89-8852ae` 等（按 CI 断言清单为准）
+
+### 监控 / 系统
+
+- **用户会话统计（TPROXY 兼容）**：`user-sessiond-ct` 用 conntrack+ARP 聚合每 MAC 会话数；
+  后台采样 + 主机名（dhcp.leases）；UA3F TPROXY 下闭源 `fwx_user.ko` 会话表为空时可正常出数。
+- **fwx 流量统计 TPROXY 补丁**（`fwx-tproxy-stat.patch`）：统计点从 FORWARD 改到
+  PRE_ROUTING/POST_ROUTING，避免 TPROXY 流量漏计。
+- **Docker**：docker / dockerd / docker-compose + luci-app-dockerman（中文）
+- **SFTP**：`openssh-sftp-server` + Dropbear SFTP
+- **FanchmWrt 应用中心**：`luci-app-fwx-app-center`（中文）
+- **rootfs 4G**：首次开机自动扩容到整盘
+- **UA3F 依赖**：nfqueue / tproxy / ipset / kmod-sched-bpf 等全套
+
+## UA3F 与 PassWall 共存（重要）
+
+数据流：`LAN → UA3F(TPROXY 改写 UA) → PassWall(redirect 加密出口) → WAN`
+
+1. **PassWall 的 TCP 代理方式保持 `redirect`**，不要改成 `tproxy`（与 UA3F 抢 mangle/PREROUTING）。
+2. 端口勿与 UA3F `1080` 重叠（PassWall SOCKS 端口见 LuCI）。
+3. 启动同为 S99，PassWall 有延迟，UA3F 无限 respawn 兜底。
+4. 本机代理开启时 PassWall 会接管 UA3F 出站——预期行为；节点故障会影响 UA 改写出站。
 
 ## 文件说明
 
 | 文件 | 说明 |
 |---|---|
-| `fanchmwrt.config` | 完整编译配置（上述定制已全部勾选） |
-| `fwx-tproxy-stat.patch` | fwx 流量统计 TPROXY 兼容补丁 |
-| `.github/workflows/build.yml` | 自动编译工作流 |
+| `fanchmwrt.config` | 完整编译配置（定制包已勾选） |
+| `fwx-tproxy-stat.patch` | fwx 流量统计 TPROXY 补丁 |
+| `.github/workflows/build.yml` | 自动编译 + defconfig 断言 |
+| `package/user-sessiond-ct/` | 会话统计守护 / LuCI 控制器 / 采样脚本 |
+| `package/srunpy/`、`package/luci-app-srunpy/` | 校园网登录（OpenWrt 包封装） |
+| `docs/compose/spec/` | compose-next 设计与交付记录 |
 
 ## 自动编译机制
 
-工作流每 6 小时检查一次上游（`fanchmwrt/fanchmwrt`）的最新提交：
-
-1. 对比上游 HEAD 与最近一次成功编译的提交（记录在仓库 tag 中）
-2. 有更新 → 拉取源码 → 打补丁 → 按 `fanchmwrt.config` 编译
-3. 产物（squashfs/ext4 × UEFI/BIOS 四种 combined 镜像）上传为 Release
-4. 无更新 → 跳过（约 1 分钟）
-
-也可在 Actions 页面手动触发（workflow_dispatch）。
+1. 每 6 小时检查上游 `fanchmwrt/fanchmwrt` 是否有新提交
+2. push / workflow_dispatch 一律编译；定时任务仅在上游变更时编译
+3. `defconfig` 后对 REQUIRED 包做**断言**，丢失则立即失败（防“CI 绿但包没进镜像”）
+4. 产物：squashfs/ext4 × UEFI/BIOS 镜像 + manifest + sha256 + SRunPy 附件 → GitHub Release
 
 ## 镜像选择
 
-- UEFI 启动：`openwrt-x86-64-generic-squashfs-combined-efi.img.gz`（推荐，可恢复出厂）
+- UEFI：`openwrt-x86-64-generic-squashfs-combined-efi.img.gz`（推荐）
 - 老式 BIOS：不带 `-efi` 的 combined
-- ext4 版方便手动折腾分区
+- ext4 便于手动改分区
 
-首次开机 rootfs 会自动扩容到整盘（>300MB 触发）。
+首次开机 rootfs 自动扩容到整盘。
+
+## 刷机后快速自检（摘要）
+
+```sh
+pgrep ua3f
+curl -s -A 'Chrome/120' http://httpbin.org/user-agent   # 期望 "FFF"
+uci get passwall.@global_forwarding[0].tcp_proxy_way    # 期望 redirect
+apk list --installed | grep -E 'passwall|mt7921e|easytier|sftp|user-sessiond|srunpy'
+lsmod | grep -E 'mt7921|ath9k|iwlwifi|rtw'
+```
+
+PassWall 需在 LuCI 中自行启用并配置节点；TCP 方式务必保持 **redirect**。
