@@ -90,6 +90,7 @@ jobs:
           src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main
           src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall.git;main
           src-git easytier https://github.com/EasyTier/luci-app-easytier.git;main
+          src-git istore https://github.com/linkease/istore.git;main
           EOF
           # UA3F 官方源码直接作为 package（含 LuCI 界面，非标准 feed 布局）
           git clone --depth 1 https://github.com/SunBK201/UA3F.git package/UA3F
@@ -156,6 +157,7 @@ jobs:
                     srunpy luci-app-srunpy python3-requests \
                     openssh-sftp-server dropbear \
                     easytier luci-app-easytier \
+                    luci-app-store taskd luci-lib-taskd \
                     kmod-mt7921e kmod-mt7921-firmware \
                     kmod-iwlwifi iwlwifi-firmware-ax200 iwlwifi-firmware-ax201 \
                     kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae"
