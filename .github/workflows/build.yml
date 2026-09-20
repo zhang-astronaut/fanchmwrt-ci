@@ -151,7 +151,7 @@ jobs:
                     luci-app-dockerman luci-i18n-dockerman-zh-cn \
                     luci-app-fwx-app-center luci-i18n-fwx-app-center-zh-cn \
                     libattr liblzo libseccomp libuv libwebsockets-full libnetfilter-queue \
-                    kmod-mt7921u kmod-mt7922-firmware wpad-basic-mbedtls \
+                    kmod-mt7921u kmod-mt7922-firmware wpad-mesh-mbedtls \
                     user-sessiond-ct \
                     srunpy luci-app-srunpy python3-requests \
                     openssh-sftp-server dropbear \
@@ -238,7 +238,7 @@ jobs:
             - 已应用 fwx TPROXY 流量统计补丁
             - 内置 UA3F（含 LuCI 界面 + 开机竞态无限重试修复）
             - 内置 PassWall（非 PassWall2）+ LuCI 界面 + xray-core / sing-box 双核心
-            - 内置 MT7922 USB 无线驱动（kmod-mt7921u + firmware + wpad）
+            - 内置无线驱动与 wpad-mesh-mbedtls（802.11s mesh + SAE，替换 wpad-basic）
             - 内置 SRunPy 校园网自动登录（srunpy + luci-app-srunpy + python3-requests）；Release 附带上游 apk/ipk
             - 内置 sftp-server（openssh-sftp-server + dropbear SFTP）与 EasyTier（easytier + luci-app-easytier）
             - 内置常用无线驱动：kmod-mt7921e(PCIe)/mt7921u(USB) + iwlwifi/ath9k/rtw88/rtw89/brcmfmac 等
