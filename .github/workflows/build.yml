@@ -157,7 +157,7 @@ jobs:
                     srunpy luci-app-srunpy python3-requests \
                     openssh-sftp-server dropbear \
                     easytier luci-app-easytier \
-                    luci-app-store taskd luci-lib-taskd \
+                    luci-app-store taskd luci-lib-taskd luci-lib-xterm mount-utils script-utils coreutils-stty tar libuci-lua \
                     kmod-mt7921e kmod-mt7921-firmware \
                     kmod-iwlwifi iwlwifi-firmware-ax200 iwlwifi-firmware-ax201 \
                     kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae"
