@@ -131,6 +131,12 @@ jobs:
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          # iStore luci-app-store depends on +tar; this tree has no CONFIG_PACKAGE_tar
+          # (busybox provides tar). Drop the unresolvable dep so the package can select.
+          if [ -f feeds/istore/luci/luci-app-store/Makefile ]; then
+            sed -i 's/ +tar / /; s/+tar //' feeds/istore/luci/luci-app-store/Makefile
+            grep -n 'LUCI_DEPENDS' feeds/istore/luci/luci-app-store/Makefile || true
+          fi
 
       # ⚠️ 重要陷阱（2026-09-13 定位）：
       # `make defconfig` 走的是 kconfig 的 --defconfig 模式，会把 fanchmwrt.config 里
@@ -157,7 +163,7 @@ jobs:
                     srunpy luci-app-srunpy python3-requests \
                     openssh-sftp-server dropbear \
                     easytier luci-app-easytier \
-                    luci-app-store taskd luci-lib-taskd luci-lib-xterm mount-utils script-utils coreutils-stty tar libuci-lua \
+                    luci-app-store taskd luci-lib-taskd luci-lib-xterm mount-utils script-utils coreutils-stty libuci-lua \
                     kmod-mt7921e kmod-mt7921-firmware \
                     kmod-iwlwifi iwlwifi-firmware-ax200 iwlwifi-firmware-ax201 \
                     kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae"
