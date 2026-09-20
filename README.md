@@ -18,7 +18,7 @@
 
 ### 无线驱动
 
-- **MT7922 USB**：`kmod-mt7921u` + `kmod-mt7922-firmware` + `wpad-basic-mbedtls`
+- **MT7922 USB**：`kmod-mt7921u` + `kmod-mt7922-firmware` + `wpad-mesh-mbedtls`（mesh/SAE，替换 basic）
 - **MT7921 PCIe（客人机/VM）**：`kmod-mt7921e` + `kmod-mt7921-firmware`
 - **其它常用无线**：`kmod-iwlwifi`（ax200/ax201 等固件）、`kmod-ath9k` / `kmod-ath10k`、
   `kmod-rtw88-8822ce`、`kmod-rtw89-8852ae` 等（按 CI 断言清单为准）
