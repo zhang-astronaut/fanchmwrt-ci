@@ -122,6 +122,8 @@ jobs:
               echo "WARN: patch no longer applies cleanly (upstream changed fwx), continuing without it"
           fi
           cp "$GITHUB_WORKSPACE/fanchmwrt.config" .config
+          # Pin Chelsio T4/T5/T6 (T520) into kernel config
+          cat "$GITHUB_WORKSPACE/package/kmod-chelsio/kernel-config" >> target/linux/x86/config-6.12
           # local packages (user-sessiond-ct, srunpy, luci-app-srunpy, ...)
           if [ -d "$GITHUB_WORKSPACE/package" ]; then
             for d in "$GITHUB_WORKSPACE/package"/*; do
@@ -173,7 +175,7 @@ jobs:
                     kmod-iwlwifi iwlwifi-firmware-ax200 iwlwifi-firmware-ax201 \
                     kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae \
                     sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn luci-app-eqos luci-app-diskman luci-i18n-eqos-zh-cn kmod-sched-cake kmod-sched-fq-pie kmod-ifb \
-                    tc-tiny kmod-libcxgb kmod-cxgb4"
+                    tc-tiny kmod-cxgb4"
           for s in $REQUIRED; do
             sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
             grep -q "^CONFIG_PACKAGE_${s}=y$" .config || echo "CONFIG_PACKAGE_${s}=y" >> .config
@@ -263,6 +265,7 @@ jobs:
             - 鈿狅笍 UA3F 涓?PassWall 鍏卞瓨娉ㄦ剰锛歅assWall 鐨?TCP 浠ｇ悊鏂瑰紡璇蜂繚鎸侀粯璁?redirect锛?
               鍕挎敼 tproxy锛堜細涓?UA3F 鐨?TPROXY 鍦?mangle PREROUTING 鎶㈠寘锛?
           files: openwrt/bin/targets/x86/64/images/*
+
 
 
 
