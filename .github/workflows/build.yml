@@ -94,6 +94,9 @@ jobs:
           EOF
           # EQoS (not in official luci feed)
           git clone --depth 1 https://github.com/Huangjoe123/luci-app-eqos.git package/luci-app-eqos
+          git clone --depth 1 https://github.com/sbwml/luci-app-diskman.git package/luci-app-diskman-src
+          mv package/luci-app-diskman-src/luci-app-diskman package/luci-app-diskman
+          rm -rf package/luci-app-diskman-src
           sed -i "s/+tc /+tc-tiny /" package/luci-app-eqos/Makefile
           # UA3F 瀹樻柟婧愮爜鐩存帴浣滀负 package锛堝惈 LuCI 鐣岄潰锛岄潪鏍囧噯 feed 甯冨眬锛?
           git clone --depth 1 https://github.com/SunBK201/UA3F.git package/UA3F
@@ -169,7 +172,7 @@ jobs:
                     kmod-mt7921e kmod-mt7921-firmware \
                     kmod-iwlwifi iwlwifi-firmware-ax200 iwlwifi-firmware-ax201 \
                     kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae \
-                    sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn luci-app-eqos luci-i18n-eqos-zh-cn kmod-sched-cake kmod-sched-fq-pie kmod-ifb \
+                    sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn luci-app-eqos luci-app-diskman luci-i18n-eqos-zh-cn kmod-sched-cake kmod-sched-fq-pie kmod-ifb \
                     tc-tiny kmod-libcxgb kmod-cxgb kmod-cxgb3 kmod-cxgb4"
           for s in $REQUIRED; do
             sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
