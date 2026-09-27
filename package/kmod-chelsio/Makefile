@@ -32,7 +32,12 @@ define KernelPackage/cxgb4
     CONFIG_CHELSIO_T1_1G=n \
     CONFIG_CHELSIO_T3=n \
     CONFIG_CHELSIO_T4 \
-    CONFIG_CHELSIO_T4VF=n
+    CONFIG_CHELSIO_T4_DCB=n \
+    CONFIG_CHELSIO_T4_FCOE=n \
+    CONFIG_CHELSIO_T4VF=n \
+    CONFIG_CHELSIO_INLINE_CRYPTO=n \
+    CONFIG_CHELSIO_IPSEC_INLINE=n \
+    CONFIG_CHELSIO_TLS_DEVICE=n
   FILES:=$(LINUX_DIR)/drivers/net/ethernet/chelsio/cxgb4/cxgb4.ko
   AUTOLOAD:=$(call AutoLoad,33,cxgb4)
 endef
