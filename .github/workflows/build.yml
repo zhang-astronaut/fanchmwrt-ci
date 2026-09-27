@@ -178,10 +178,11 @@ jobs:
             if grep -q "^CONFIG_PACKAGE_${s}=y$" .config; then
               echo "  OK   $s"
             else
-              echo "  FAIL $s 鏈敓鏁堬紙渚濊禆琚鍓紵锛?; fail=1
+              echo "  FAIL $s (dropped by defconfig/missing)"
+              fail=1
             fi
           done
-          [ "$fail" = "0" ] || { echo "鍏抽敭鍖呮湭杩涘叆閰嶇疆锛岀粓姝㈢紪璇?; exit 1; }
+          [ "$fail" = "0" ] || { echo "required packages missing, abort build"; exit 1; }
           make download -j$(nproc)
           find dl -size -1024c -exec rm -f {} \; || true
 
@@ -256,6 +257,8 @@ jobs:
             - 鈿狅笍 UA3F 涓?PassWall 鍏卞瓨娉ㄦ剰锛歅assWall 鐨?TCP 浠ｇ悊鏂瑰紡璇蜂繚鎸侀粯璁?redirect锛?
               鍕挎敼 tproxy锛堜細涓?UA3F 鐨?TPROXY 鍦?mangle PREROUTING 鎶㈠寘锛?
           files: openwrt/bin/targets/x86/64/images/*
+
+
 
 
 
