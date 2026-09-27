@@ -165,8 +165,8 @@ jobs:
                     luci-app-store taskd luci-lib-taskd luci-lib-xterm mount-utils script-utils coreutils-stty libuci-lua \
                     kmod-mt7921e kmod-mt7921-firmware \
                     kmod-iwlwifi iwlwifi-firmware-ax200 iwlwifi-firmware-ax201 \
-                    kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae `
-                    sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn luci-app-eqos luci-i18n-eqos-zh-cn kmod-sched-cake kmod-sched-fq-pie kmod-ifb `
+                    kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae \
+                    sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn luci-app-eqos luci-i18n-eqos-zh-cn kmod-sched-cake kmod-sched-fq-pie kmod-ifb \
                     kmod-libcxgb kmod-cxgb kmod-cxgb3 kmod-cxgb4 firmware-cxgb3 firmware-cxgb4"
           for s in $REQUIRED; do
             sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
@@ -256,5 +256,6 @@ jobs:
             - 鈿狅笍 UA3F 涓?PassWall 鍏卞瓨娉ㄦ剰锛歅assWall 鐨?TCP 浠ｇ悊鏂瑰紡璇蜂繚鎸侀粯璁?redirect锛?
               鍕挎敼 tproxy锛堜細涓?UA3F 鐨?TPROXY 鍦?mangle PREROUTING 鎶㈠寘锛?
           files: openwrt/bin/targets/x86/64/images/*
+
 
 
